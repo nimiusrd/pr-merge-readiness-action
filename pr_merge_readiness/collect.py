@@ -7,15 +7,19 @@ import json
 import os
 import re
 from collections import Counter
+from collections.abc import Mapping
 from datetime import datetime, timezone
+from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .contracts import (
     ChangedFile,
+    Check,
     ChangeHistory,
     DecisionMetadata,
+    FileHistory,
     ObservationChange,
     Observations,
     PullRequest,
@@ -51,7 +55,7 @@ class GitHub:
         self.api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
         self.graphql_url = os.environ.get("GITHUB_GRAPHQL_URL", "https://api.github.com/graphql")
 
-    def request(self, path: str, body: dict | None = None):
+    def request(self, path: str, body: dict[str, Any] | None = None) -> Any:
         headers = {
             "Accept": "application/vnd.github+json",
             "Content-Type": "application/json",
@@ -83,7 +87,7 @@ class GitHub:
             raise CollectionError("GraphQL returned errors")
         return result
 
-    def pages(self, path: str, key: str | None = None) -> list:
+    def pages(self, path: str, key: str | None = None) -> list[dict[str, Any]]:
         records = []
         separator = "&" if "?" in path else "?"
         for page in range(1, MAX_PAGES + 1):
@@ -98,7 +102,7 @@ class GitHub:
                 return records
         raise CollectionError("REST pagination limit exceeded")
 
-    def graphql(self, number: int, selection: str, cursor: str | None = None) -> dict:
+    def graphql(self, number: int, selection: str, cursor: str | None = None) -> dict[str, Any]:
         query = """
 query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -109,13 +113,13 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
         # PR state queryに未使用の変数宣言を残さない。
         if "$cursor" not in selection:
             query = query.replace(", $cursor: String", "")
-        variables = {"owner": self.owner, "repo": self.repo, "number": number}
+        variables: dict[str, Any] = {"owner": self.owner, "repo": self.repo, "number": number}
         if "$cursor" in selection:
             variables["cursor"] = cursor
         result = self.request("/graphql", {"query": query, "variables": variables})
-        return result["data"]["repository"]["pullRequest"]
+        return cast(dict[str, Any], result["data"]["repository"]["pullRequest"])
 
-    def connection(self, number: int, name: str, fields: str) -> list:
+    def connection(self, number: int, name: str, fields: str) -> list[dict[str, Any]]:
         records = []
         cursor = None
         for _ in range(MAX_PAGES):
@@ -138,7 +142,7 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
         raise CollectionError("GraphQL pagination limit exceeded")
 
 
-def normalized_pr(raw: dict) -> PullRequest:
+def normalized_pr(raw: dict[str, Any]) -> PullRequest:
     merge = raw["potentialMergeCommit"]
     return {
         "number": raw["number"],
@@ -164,7 +168,7 @@ def decision_metadata(
     pr: PullRequest,
 ) -> DecisionMetadata:
     """判定に使うCI・レビュー状態を同じ方法で再取得できるようにする。"""
-    metadata = {}
+    metadata: DecisionMetadata = {"reviews": [], "checks": [], "unresolved_threads": 0}
     reviews = api.pages(f"/pulls/{number}/reviews")
     metadata["reviews"] = [
         {
@@ -214,16 +218,21 @@ def decision_metadata(
                     "conclusion": status["state"],
                 }
             )
-    for key in ("reviews", "checks"):
-        metadata[key].sort(key=lambda item: json.dumps(item, sort_keys=True))
+    for records in (metadata["reviews"], metadata["checks"]):
+        records.sort(key=lambda item: json.dumps(item, sort_keys=True))
     return metadata
 
 
-def observation_changes(before: dict, after: dict) -> list[ObservationChange]:
+def observation_changes(before: dict[str, Any], after: dict[str, Any]) -> list[ObservationChange]:
     """許可済みの正規化メタデータだけから、変更フィールドと前後値を残す。"""
-    changes = []
+    changes: list[ObservationChange] = []
 
-    def compare(group, old, new, identity=None):
+    def compare(
+        group: str,
+        old: Mapping[str, Any],
+        new: Mapping[str, Any],
+        identity: dict[str, Any] | None = None,
+    ) -> None:
         for field in sorted(old.keys() | new.keys()):
             if old.get(field) != new.get(field):
                 changes.append(
@@ -295,7 +304,7 @@ class ChangeHistoryCollector:
             )
         history: ChangeHistory = {"base_sha": base, "files": []}
         for path, previous in paths:
-            record = {
+            record: FileHistory = {
                 "path": path,
                 "history_path": previous,
                 "last_commit_sha": None,
@@ -316,7 +325,7 @@ class ChangeHistoryCollector:
                     timestamp(at, "last_changed_at")
                     self.cache[key] = (sha(last["sha"]), at)
                 commit, at = self.cache[key]
-                record.update(last_commit_sha=commit, last_changed_at=at)
+                record.update({"last_commit_sha": commit, "last_changed_at": at})
             history["files"].append(record)
         return history
 
@@ -340,7 +349,7 @@ def collect(
         facts["pr"] = before
         # RESTの旧pathも使い、workflowディレクトリ外へのrenameを取りこぼさない。
         # 同梱されるpatchやsource URLは参照・保存しない。
-        files = []
+        files: list[ChangedFile] = []
         for raw in api.pages(f"/pulls/{number}/files"):
             previous = (
                 string(raw["previous_filename"], "previous_filename")
@@ -389,18 +398,20 @@ def collect(
             number,
             before,
         )
-        facts.update(initial_metadata)
+        facts["reviews"] = initial_metadata["reviews"]
+        facts["checks"] = initial_metadata["checks"]
+        facts["unresolved_threads"] = initial_metadata["unresolved_threads"]
         collector = (
             history_collector if history_collector is not None else ChangeHistoryCollector(api)
         )
         facts["change_history"] = collector.collect(before["base_sha"], files)
-        histories = {}
+        histories: dict[tuple[str, str, str, int | str], list[Check]] = {}
         for check in facts["checks"]:
             key = (
                 check["sha"],
                 check["kind"],
                 check["name"],
-                check.get("app_id", check.get("creator")),
+                check["app_id"] if check["kind"] == "check_run" else check["creator"],
             )
             histories.setdefault(key, []).append(check)
         facts["ci_history"] = [
@@ -425,7 +436,10 @@ def collect(
         after = normalized_pr(api.graphql(number, PR_FIELDS))
         facts["rechecked"] = {
             "pr": before == after,
-            **{key: initial_metadata[key] == confirmed_metadata[key] for key in initial_metadata},
+            "reviews": initial_metadata["reviews"] == confirmed_metadata["reviews"],
+            "checks": initial_metadata["checks"] == confirmed_metadata["checks"],
+            "unresolved_threads": initial_metadata["unresolved_threads"]
+            == confirmed_metadata["unresolved_threads"],
         }
         facts["stable"] = all(facts["rechecked"].values())
         facts["observation_changes"] = observation_changes(
@@ -438,7 +452,7 @@ def collect(
     return facts
 
 
-def targets(api: GitHub, event: dict, requested: int | None) -> list[int]:
+def targets(api: GitHub, event: dict[str, Any], requested: int | None) -> list[int]:
     if requested is not None:
         if requested <= 0:
             raise CollectionError("PR number must be positive")

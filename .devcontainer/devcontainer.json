@@ -1,12 +1,15 @@
 {
   "name": "pr-merge-readiness-action",
-  "image": "mcr.microsoft.com/devcontainers/python:3.11-bookworm",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
   "remoteUser": "vscode",
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
-        "charliermarsh.ruff"
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker"
       ],
       "settings": {
         "editor.formatOnSave": true,
@@ -18,7 +21,11 @@
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff"
         },
-        "python.analysis.typeCheckingMode": "basic",
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "mypy-type-checker.importStrategy": "fromEnvironment",
+        "python.analysis.typeCheckingMode": "off",
         "ruff.lint.run": "onSave",
         "ruff.format.preview": true
       }
@@ -28,5 +35,5 @@
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
-  "postCreateCommand": "python -m pip install -r requirements-dev.txt"
+  "postCreateCommand": "uv python install && uv sync --locked"
 }

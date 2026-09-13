@@ -5,9 +5,10 @@ import json
 from pathlib import Path
 
 from .config import ACTION_REPOSITORY, WORKFLOW_PATH, relative_path
+from .contracts import Config
 
 
-def render(config: dict, config_path: str, output_path: str) -> str:
+def render(config: Config, config_path: str, output_path: str) -> str:
     relative_path(config_path)
     relative_path(output_path)
     ref = config["action_ref"]
@@ -67,7 +68,7 @@ jobs:
 """
 
 
-def generate_workflow(config: dict, config_path: Path, output_path: Path, check: bool) -> int:
+def generate_workflow(config: Config, config_path: Path, output_path: Path, check: bool) -> int:
     # 出力にローカル絶対パスを混ぜない。利用側 repository のルートから実行する。
     desired = render(config, config_path.as_posix(), output_path.as_posix())
     actual = output_path.read_text() if output_path.is_file() else ""

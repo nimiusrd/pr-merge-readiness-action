@@ -7,13 +7,16 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path
+from typing import Any, cast
 
 from .artifacts import validate_report
 from .config import ACTION_REPOSITORY
-from .contracts import EvaluationError, sha
+from .contracts import Assessment, EvaluationError, sha
 
 
-def replay(report: dict, source_dir: Path, repository: str, action_sha: str) -> dict:
+def replay(
+    report: dict[str, Any], source_dir: Path, repository: str, action_sha: str
+) -> Assessment:
     validate_report(report)
     expected = {"repository": repository, "sha": sha(action_sha), "path": "pr_merge_readiness"}
     if repository != ACTION_REPOSITORY or report["provenance"]["evaluator"] != expected:
@@ -40,7 +43,10 @@ def replay(report: dict, source_dir: Path, repository: str, action_sha: str) -> 
                 member = sources.getmember("pr_merge_readiness/" + name)
                 if not member.isfile():
                     raise EvaluationError("evaluator modules must be regular files")
-                (package / name).write_bytes(sources.extractfile(member).read())
+                stream = sources.extractfile(member)
+                if stream is None:
+                    raise EvaluationError("evaluator module content is missing")
+                (package / name).write_bytes(stream.read())
         run = subprocess.run(
             [
                 sys.executable,
@@ -70,4 +76,4 @@ print(json.dumps(result))
             capture_output=True,
             text=True,
         )
-    return json.loads(run.stdout)
+    return cast(Assessment, json.loads(run.stdout))

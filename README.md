@@ -2,7 +2,7 @@
 
 GitHub の PR・レビュー・CI・変更履歴を読み取り、マージ準備状況を観測する独立 Action です。参考 Check と手動ラベルを公開できます。マージや承認、branch protection の変更は行いません。
 
-初期対応環境は GitHub.com、Ubuntu、Python 3.11 以上、Git です。実行時の Python 依存パッケージはありません。CI・Dev Container・共通 workflow は Python 3.11 を使用します。
+対応環境は GitHub.com、Ubuntu、Python 3.14、Git です。Python は uv 0.12.13 で管理し、Action・CI・Dev Container・共通 workflow で同じ minor を使用します。実行時の Python 依存パッケージはありません。
 
 ## 導入
 
@@ -11,7 +11,8 @@ GitHub の PR・レビュー・CI・変更履歴を読み取り、マージ準�
 3. 利用側リポジトリのルートで、取得した Action の CLI から入口を生成します。
 
 ```sh
-python3 -I -B /absolute/path/to/pr-merge-readiness-action/cli.py generate-workflow \
+uv python install --no-config 3.14
+bash /absolute/path/to/pr-merge-readiness-action/run.sh generate-workflow \
   --config .github/pr-merge-readiness.toml \
   --output .github/workflows/pr-merge-readiness.yml
 ```
@@ -86,7 +87,7 @@ app_id = 15368
 
 `publish-*` は `pr-number` と `event-path` を受け取りません。`publish-labels` は実イベントの明示的な手動入力と、全 open PR 観測を要求します。出力は `report-dir`、`manifest`、`artifact-name`、`config-sha`。`mark` の出力は設定 SHA だけです。複数 PR の判定を boolean に集約しません。
 
-Action は自身の配置から `python -I -B` で起動します。利用側の Python モジュール、`PYTHONPATH`、`sitecustomize`、PR ソースを実行しません。入力値は環境変数を経由し、シェルコードに直接展開しません。
+Action は固定版の uv で Python 3.14 を用意し、自身の `run.sh` から `python -I -B` で起動します。起動時は利用側の `pyproject.toml`、`uv.toml`、`.python-version`、仮想環境を参照しません。利用側の Python モジュール、`PYTHONPATH`、`sitecustomize`、PR ソースを実行しません。入力値は環境変数を経由し、シェルコードに直接展開しません。
 
 ## レポートとオフライン再評価
 
@@ -99,7 +100,7 @@ artifact 名は run ID と attempt ごとに分け、保持期間を 30 日に�
 新しい artifact を展開し、その Action SHA を含む、利用者が信頼したローカル Git リポジトリを指定します。
 
 ```sh
-python3 -I -B /absolute/path/to/pr-merge-readiness-action/cli.py replay \
+bash /absolute/path/to/pr-merge-readiness-action/run.sh replay \
   --report /absolute/path/to/artifact/pr-123.json \
   --source-dir /absolute/path/to/trusted-action-git \
   --source-repository nimiusrd/pr-merge-readiness-action \
@@ -114,11 +115,15 @@ python3 -I -B /absolute/path/to/pr-merge-readiness-action/cli.py replay \
 
 ```sh
 devcontainer up --workspace-folder .
-devcontainer exec --workspace-folder . python -B -m unittest discover -s tests -t .
-devcontainer exec --workspace-folder . ruff check .
-devcontainer exec --workspace-folder . ruff format --check .
-devcontainer exec --workspace-folder . python scripts/check_workflows.py
+devcontainer exec --workspace-folder . uv sync --locked
+devcontainer exec --workspace-folder . uv run --locked pytest
+devcontainer exec --workspace-folder . uv run --locked ruff check .
+devcontainer exec --workspace-folder . uv run --locked ruff format --check .
+devcontainer exec --workspace-folder . uv run --locked mypy
+devcontainer exec --workspace-folder . uv run --locked python scripts/check_workflows.py
 ```
+
+`.python-version` で Python 3.14、`uv.lock` で開発依存関係を固定します。依存更新時は `uv lock --upgrade` で lockfile を更新し、上記検証を実行してください。テストは pytest の関数・fixture・パラメータ化で記述し、Ruff で lint と整形、mypy の strict mode でパッケージ・CLI・検証スクリプトを型検査します。
 
 移行は旧 writer の実行終了を確認し、新入口の追加と旧入口の停止を同じ PR にまとめます。旧実装は実測検証後の整理 PR で削除します。削除後のロールバックは、整理変更と移行変更の両方を revert した 1 本の PR で旧実装の復元と入口の切替をまとめます。新旧 artifact は変換しません。
 

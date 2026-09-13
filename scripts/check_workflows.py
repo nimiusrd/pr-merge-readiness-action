@@ -2,7 +2,9 @@
 
 import re
 import sys
+import tomllib
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -12,21 +14,47 @@ from pr_merge_readiness.config import CALLER_PATH, CONFIG_PATH, load_config
 from pr_merge_readiness.generate import render
 
 
-def load(path):
-    return yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+def load(path: Path) -> dict[str, Any]:
+    return cast(dict[str, Any], yaml.load(path.read_text(), Loader=yaml.BaseLoader))
 
 
-def main():
+def main() -> None:
     action = load(ROOT / "action.yml")
     assert action["runs"]["using"] == "composite"
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert (ROOT / ".python-version").read_text().strip() == "3.14"
+    assert project["project"]["requires-python"] == ">=3.14"
+    assert project["tool"]["mypy"]["python_version"] == "3.14"
+    assert project["tool"]["mypy"]["strict"] is True
+    assert project["tool"]["ruff"]["target-version"] == "py314"
+    steps = list(action["runs"]["steps"])
     for path in (ROOT / ".github/workflows").glob("*.yml"):
         workflow = load(path)
         assert "on" in workflow and "jobs" in workflow
         assert "schedule" not in workflow["on"]
         for job in workflow["jobs"].values():
-            for step in job.get("steps", []):
-                if "uses" in step and not step["uses"].startswith("./"):
-                    assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", step["uses"]), step["uses"]
+            steps.extend(job.get("steps", []))
+    uv_setups = 0
+    for step in steps:
+        uses = step.get("uses", "")
+        if uses and not uses.startswith("./"):
+            assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", uses), uses
+        assert not uses.startswith("actions/setup-python@")
+        if uses.startswith("astral-sh/setup-uv@"):
+            uv_setups += 1
+            assert step["with"]["python-version"] == "3.14"
+            assert "==" + step["with"]["version"] == project["tool"]["uv"]["required-version"]
+    assert uv_setups == 4  # Composite、CI、準備、提案設定の検証
+    ci = load(ROOT / ".github/workflows/ci.yml")
+    commands = {step.get("run") for step in ci["jobs"]["test"]["steps"]}
+    assert {
+        "uv sync --locked",
+        "uv run --locked pytest",
+        "uv run --locked ruff check .",
+        "uv run --locked ruff format --check .",
+        "uv run --locked mypy",
+        "uv run --locked python scripts/check_workflows.py",
+    } <= commands
     runtime = load(ROOT / ".github/workflows/readiness.yml")
     jobs = runtime["jobs"]
     for name in ("prepare", "observe"):

@@ -3,22 +3,23 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import Any, Final, cast
 
 from .config import ACTION_REPOSITORY, WORKFLOW_PATH, positive, relative_path
-from .contracts import EvaluationError, sha
+from .contracts import Assessment, EvaluationError, Policy, Provenance, sha
 from .evaluate import validate_policy
 
-REPORT_FORMAT = "pr-merge-readiness/report"
-MANIFEST_FORMAT = "pr-merge-readiness/manifest"
+REPORT_FORMAT: Final = "pr-merge-readiness/report"
+MANIFEST_FORMAT: Final = "pr-merge-readiness/manifest"
 
 
-def fingerprint(policy: dict) -> str:
+def fingerprint(policy: Policy) -> str:
     return hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest()
 
 
 def provenance(
     repository: str, action_sha: str, config_sha: str, config_path: str, workflow_sha: str = ""
-) -> dict:
+) -> Provenance:
     return {
         "evaluator": {
             "repository": ACTION_REPOSITORY,
@@ -46,11 +47,11 @@ def artifact_name(run_id: str, attempt: str) -> str:
     return f"pr-merge-readiness-{run_id}-{attempt}"
 
 
-def write_json(path: Path, value: dict) -> None:
+def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
-def validate_report(report: dict) -> dict:
+def validate_report(report: dict[str, Any]) -> Assessment:
     if (
         report.get("format") != REPORT_FORMAT
         or type(report.get("schema_version")) is not int
@@ -72,7 +73,7 @@ def validate_report(report: dict) -> dict:
         raise EvaluationError("invalid provenance")
     if source["workflow"] and source["workflow"]["sha"] != source["evaluator"]["sha"]:
         raise EvaluationError("workflow/evaluator SHA mismatch")
-    return report
+    return cast(Assessment, report)
 
 
 def load_reports(
@@ -81,9 +82,9 @@ def load_reports(
     run_id: str,
     attempt: str,
     name: str,
-    source: dict,
-    policy: dict,
-) -> list[tuple[int, dict]]:
+    source: Provenance,
+    policy: Policy,
+) -> list[tuple[int, Assessment]]:
     manifest = json.loads((directory / "manifest.json").read_text())
     if (
         manifest.get("format") != MANIFEST_FORMAT
