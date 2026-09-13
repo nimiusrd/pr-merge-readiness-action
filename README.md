@@ -90,7 +90,9 @@ Action は自身の配置から `python -I -B` で起動します。利用側の
 
 ## レポートとオフライン再評価
 
-artifact 名は run ID と attempt ごとに分け、30 日保持します。PR 別 `pr-番号.json`、`manifest.json`、`summary.md` を保存し、収集失敗時にも今回の JSON と Summary を残します。別 run／attempt の artifact を探す fallback はありません。
+artifact 名は run ID と attempt ごとに分け、保持期間を 30 日に設定します。PR 別 `pr-番号.json`、`manifest.json`、`summary.md` を保存し、収集失敗時にも今回の JSON と Summary を残します。別 run／attempt の artifact を探す fallback はありません。
+
+同じ run の全 job 再実行では、前 attempt の artifact が GitHub API から取得できなくなる挙動を[実測](https://github.com/nimiusrd/nimius-player/actions/runs/34766780386/attempts/2)しました。名前を attempt ごとに分けても発生し、[upload-artifact #585](https://github.com/actions/upload-artifact/issues/585) にも同種の報告があります。再観測には新しい **Run workflow** を使い、再実行する場合は必要な artifact を先に Git 外へ保存してください。30日の保存設定は、GitHub 上で削除・再実行された artifact の再取得を保証しません。
 
 レポートは `format = "pr-merge-readiness/report"`、manifest は `format = "pr-merge-readiness/manifest"`、いずれも `schema_version = 1` です。レポートには観測、正規化 policy、policy の SHA-256 指紋、判定、conditions、出所を保存します。出所は評価器・設定・共通 workflow の repository／SHA／path。共通 workflow を使わない実行の workflow 出所は null です。manifest は repository、run ID、attempt、artifact 名、観測範囲、PR 別ファイル一覧、収集失敗状態、同じ出所を持ちます。公開前に一覧の全ファイルを検証します。
 
@@ -118,7 +120,7 @@ devcontainer exec --workspace-folder . ruff format --check .
 devcontainer exec --workspace-folder . python scripts/check_workflows.py
 ```
 
-移行は旧 writer の実行終了を確認し、新入口の追加と旧入口の停止を同じ PR にまとめます。旧実装は実測検証後の整理 PR で削除します。ロールバックはその変更の revert で入口を一括切替します。新旧 artifact は変換しません。
+移行は旧 writer の実行終了を確認し、新入口の追加と旧入口の停止を同じ PR にまとめます。旧実装は実測検証後の整理 PR で削除します。削除後のロールバックは、整理変更と移行変更の両方を revert した 1 本の PR で旧実装の復元と入口の切替をまとめます。新旧 artifact は変換しません。
 
 実測記録には run URL、attempt、対象 SHA、Action SHA、設定 SHA、JSON 名、期待値・実測値を残します。生 JSON は artifact または Git 外に保存します。本人名義の検証 PR では自己承認を使えないため、人間承認による解除は自動テストで確認し、実測済みとは記載しません。
 
