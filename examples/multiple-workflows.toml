@@ -1,9 +1,10 @@
-# action_ref は利用する release の実 SHA に置き換えてください。
+# 架空の複数 workflow 構成例です。特定のリポジトリの設定ではありません。
+# workflow・Check 名と action_ref を利用先の実際の値に置き換えてください。
 version = 1
 action_ref = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 [ci]
-workflows = ["frontend", "tauri-rust", "css"]
+workflows = ["Build", "Quality", "Security"]
 
 [review]
 minimum_approvals = 0
@@ -16,35 +17,35 @@ labels = "manual"
 
 [[ci.required_checks]]
 kind = "check_run"
-name = "Lint & format"
+name = "Linux build"
 app_id = 15368
 
 [[ci.required_checks]]
 kind = "check_run"
-name = "Unit tests (coverage)"
+name = "Windows build"
 app_id = 15368
 
 [[ci.required_checks]]
 kind = "check_run"
-name = "npm audit"
+name = "Unit tests"
 app_id = 15368
 
 [[ci.required_checks]]
 kind = "check_run"
-name = "E2E (Playwright)"
+name = "End-to-end tests"
 app_id = 15368
 
 [[ci.required_checks]]
 kind = "check_run"
-name = "Windows compile check"
+name = "Lint"
 app_id = 15368
 
 [[ci.required_checks]]
 kind = "check_run"
-name = "tauri-rust"
+name = "Format"
 app_id = 15368
 
 [[ci.required_checks]]
 kind = "check_run"
-name = "css"
+name = "Dependency audit"
 app_id = 15368

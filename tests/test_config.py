@@ -17,7 +17,7 @@ def config():
     return load_config(ROOT / "examples/devops-tycoon.toml")
 
 
-@pytest.mark.parametrize("name,count", (("devops-tycoon", 2), ("nimius-player", 7)))
+@pytest.mark.parametrize("name,count", (("devops-tycoon", 2), ("multiple-workflows", 7)))
 def test_examples_have_exact_workflow_and_check_identities(name, count):
     value = load_config(ROOT / "examples" / f"{name}.toml")
     assert len(value["ci"]["required_checks"]) == count

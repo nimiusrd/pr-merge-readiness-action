@@ -7,7 +7,7 @@ GitHub の PR・レビュー・CI・変更履歴を読み取り、マージ準�
 ## 導入
 
 1. 検証済み release の **40 桁 commit SHA** を決め、対応するソースを取得します。タグやブランチ名を運用参照には使いません。
-2. [設定例](examples/)を利用側の `.github/pr-merge-readiness.toml` にコピーし、`action_ref`、CI workflow 名、必須 Check の名前と発行元を設定します。
+2. [公開リポジトリ devops-tycoon の設定例](examples/devops-tycoon.toml)、または[架空の複数 workflow 構成例](examples/multiple-workflows.toml)を利用側の `.github/pr-merge-readiness.toml` にコピーし、`action_ref`、CI workflow 名、必須 Check の名前と発行元を設定します。
 3. 利用側リポジトリのルートで、取得した Action の CLI から入口を生成します。
 
 ```sh
@@ -93,7 +93,7 @@ Action は固定版の uv で Python 3.14 を用意し、自身の `run.sh` か�
 
 artifact 名は run ID と attempt ごとに分け、保持期間を 30 日に設定します。PR 別 `pr-番号.json`、`manifest.json`、`summary.md` を保存し、収集失敗時にも今回の JSON と Summary を残します。別 run／attempt の artifact を探す fallback はありません。
 
-同じ run の全 job 再実行では、前 attempt の artifact が GitHub API から取得できなくなる挙動を[実測](https://github.com/nimiusrd/nimius-player/actions/runs/34766780386/attempts/2)しました。名前を attempt ごとに分けても発生し、[upload-artifact #585](https://github.com/actions/upload-artifact/issues/585) にも同種の報告があります。再観測には新しい **Run workflow** を使い、再実行する場合は必要な artifact を先に Git 外へ保存してください。30日の保存設定は、GitHub 上で削除・再実行された artifact の再取得を保証しません。
+同じ run の全 job 再実行では、前 attempt の artifact が取得できなくなる場合があります。[upload-artifact #585](https://github.com/actions/upload-artifact/issues/585) に、名前を attempt ごとに分けた場合も含む報告があります。再観測には新しい **Run workflow** を使い、再実行する場合は必要な artifact を先に Git 外へ保存してください。30日の保存設定は、GitHub 上で削除・再実行された artifact の再取得を保証しません。
 
 レポートは `format = "pr-merge-readiness/report"`、manifest は `format = "pr-merge-readiness/manifest"`、いずれも `schema_version = 1` です。レポートには観測、正規化 policy、policy の SHA-256 指紋、判定、conditions、出所を保存します。出所は評価器・設定・共通 workflow の repository／SHA／path。共通 workflow を使わない実行の workflow 出所は null です。manifest は repository、run ID、attempt、artifact 名、観測範囲、PR 別ファイル一覧、収集失敗状態、同じ出所を持ちます。公開前に一覧の全ファイルを検証します。
 
