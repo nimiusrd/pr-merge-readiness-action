@@ -1,0 +1,20 @@
+# v0.2.0。workflow の uses / action-ref にも同じ SHA を指定します。
+version = 1
+action_ref = "68a4aa9a0b4778452fc7f74d77c48d508d62bfe2"
+
+[ci]
+workflows = ["CI"]
+
+[review]
+minimum_approvals = 0
+require_resolved_threads = true
+stale_change_review_days = 30
+
+[publication]
+checks = true
+labels = "manual"
+
+[[ci.required_checks]]
+kind = "check_run"
+name = "test"
+app_id = 15368

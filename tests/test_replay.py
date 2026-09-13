@@ -95,7 +95,7 @@ def test_cli_does_not_import_consumer_modules_or_project_environment(tmp_path, l
     poison = virtualenv / "bin/python"
     poison.write_text('#!/bin/sh\ntouch "' + str(tmp_path / "executed") + '"\nexit 99\n')
     poison.chmod(0o755)
-    shutil.copyfile(ROOT / "examples/devops-tycoon.toml", tmp_path / "config.toml")
+    shutil.copyfile(ROOT / "examples/minimal.toml", tmp_path / "config.toml")
     command = (
         [sys.executable, "-I", "-B", str(ROOT / "cli.py")]
         if launcher == "python"

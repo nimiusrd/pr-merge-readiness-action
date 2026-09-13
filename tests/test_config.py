@@ -14,10 +14,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def config():
-    return load_config(ROOT / "examples/devops-tycoon.toml")
+    return load_config(ROOT / "examples/minimal.toml")
 
 
-@pytest.mark.parametrize("name,count", (("devops-tycoon", 2), ("multiple-workflows", 7)))
+@pytest.mark.parametrize("name,count", (("minimal", 1), ("multiple-workflows", 7)))
 def test_examples_have_exact_workflow_and_check_identities(name, count):
     value = load_config(ROOT / "examples" / f"{name}.toml")
     assert len(value["ci"]["required_checks"]) == count
