@@ -47,11 +47,12 @@ def validate_policy(policy: Policy) -> Policy:
             raise EvaluationError("invalid required check keys")
         name = string(check["name"], "check.name")
         kind = check["kind"]
-        if kind == "check_run":
+        producer: int | str
+        if check["kind"] == "check_run":
             producer = integer(check["app_id"], "check.app_id")
             if producer == 0:
                 raise EvaluationError("app_id must be positive")
-        elif kind == "status":
+        elif check["kind"] == "status":
             producer = string(check["creator"], "check.creator")
         else:
             raise EvaluationError("unknown check kind")
@@ -62,9 +63,9 @@ def validate_policy(policy: Policy) -> Policy:
     return policy
 
 
-def check_identity(check: RequiredCheck) -> tuple:
+def check_identity(check: RequiredCheck) -> tuple[str, str, int | str]:
     kind = check["kind"]
-    producer = check["app_id"] if kind == "check_run" else check["creator"]
+    producer = check["app_id"] if check["kind"] == "check_run" else check["creator"]
     return kind, check["name"], producer
 
 
@@ -154,11 +155,12 @@ def assess(facts: Observations, policy: Policy) -> Assessment:
         mergeable = pr["mergeable"]
         if mergeable not in {"MERGEABLE", "CONFLICTING", "UNKNOWN"}:
             raise EvaluationError("unknown mergeable value")
-        condition(
-            "mergeable",
-            {"MERGEABLE": "pass", "CONFLICTING": "blocked", "UNKNOWN": "waiting"}[mergeable],
-            mergeable,
-        )
+        mergeable_status: dict[str, ConditionStatus] = {
+            "MERGEABLE": "pass",
+            "CONFLICTING": "blocked",
+            "UNKNOWN": "waiting",
+        }
+        condition("mergeable", mergeable_status[mergeable], mergeable)
         review_decision = pr["review_decision"]
         if review_decision not in {
             None,
@@ -188,10 +190,10 @@ def assess(facts: Observations, policy: Policy) -> Assessment:
                 integer(r["id"], "review.id"),
             ),
         ):
-            state = review["state"]
-            if state not in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED", "COMMENTED"}:
+            review_state = review["state"]
+            if review_state not in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED", "COMMENTED"}:
                 raise EvaluationError("unknown review state")
-            if state in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            if review_state in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
                 latest[string(review["author"], "review.author")] = review
         changes = [r["id"] for r in latest.values() if r["state"] == "CHANGES_REQUESTED"]
         condition("change_requests", "blocked" if changes else "pass", changes)
@@ -263,6 +265,7 @@ def assess(facts: Observations, policy: Policy) -> Assessment:
                 condition(label, "waiting", {"reason": "missing", "identity": identity})
                 continue
             current = max(matching, key=lambda c: integer(c["id"], "check.id"))
+            state: ConditionStatus
             if current["status"] in {
                 "queued",
                 "in_progress",
@@ -282,7 +285,7 @@ def assess(facts: Observations, policy: Policy) -> Assessment:
         # その完了後に再評価する。CI失敗・変更要求などのblockedは引き続き優先する。
         merge_state = pr["merge_state"]
         has_waiting_condition = any(c["status"] == "waiting" for c in result["conditions"])
-        status = (
+        status: ConditionStatus = (
             "pass"
             if merge_state == "CLEAN"
             else "waiting"

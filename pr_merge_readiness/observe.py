@@ -4,26 +4,28 @@ import html
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from .artifacts import MANIFEST_FORMAT, write_json
-from .collect import ChangeHistoryCollector, CollectionError, collect, targets
+from .collect import ChangeHistoryCollector, CollectionError, GitHub, collect, targets
+from .contracts import Manifest, Policy, Provenance
 from .evaluate import assess
 from .report import markdown
 
 
 def observe(
-    api,
-    policy: dict,
-    event: dict,
+    api: GitHub,
+    policy: Policy,
+    event: dict[str, Any],
     number: int | None,
     directory: Path,
-    source: dict,
+    source: Provenance,
     run_id: str,
     attempt: str,
     name: str,
 ) -> int:
     directory.mkdir(parents=True, exist_ok=True)
-    manifest = {
+    manifest: Manifest = {
         "format": MANIFEST_FORMAT,
         "schema_version": 1,
         "repository": api.repository,
@@ -42,7 +44,8 @@ def observe(
         collector = ChangeHistoryCollector(api)
         for target in targets(api, event, number):
             facts = collect(api, target, history_collector=collector)
-            result = {**assess(facts, policy), "provenance": source}
+            result = assess(facts, policy)
+            result["provenance"] = source
             filename = f"pr-{target}.json"
             write_json(directory / filename, result)
             manifest["reports"].append(filename)

@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -60,7 +62,9 @@ class GitHub:
         self.prefix = f"/repos/{repository}"
         self.api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
 
-    def request(self, path: str, body: dict | None = None, method: str | None = None):
+    def request(
+        self, path: str, body: dict[str, Any] | None = None, method: str | None = None
+    ) -> Any:
         headers = {
             "Accept": "application/vnd.github+json",
             "Content-Type": "application/json",
@@ -92,7 +96,7 @@ class GitHub:
         except (URLError, TimeoutError, OSError, ValueError) as error:
             raise PublishError(f"API {verb} {path}: {type(error).__name__}") from None
 
-    def pages(self, path: str) -> list:
+    def pages(self, path: str) -> list[dict[str, Any]]:
         records = []
         separator = "&" if "?" in path else "?"
         for page in range(1, MAX_PAGES + 1):
@@ -133,13 +137,15 @@ def ensure_labels(api: GitHub) -> None:
                 api.request(path)
 
 
-def desired_label(report: Assessment, current: dict, repository: str, number: int) -> str | None:
+def desired_label(
+    report: Assessment, current: dict[str, Any], repository: str, number: int
+) -> str | None:
     """PRが変化していれば情報不足、closedなら表示を取り除く。"""
     decision = report.get("decision")
     if decision not in DECISION_LABELS:
         raise PublishError(f"unknown decision: {decision}")
-    facts = report.get("observations") or {}
-    observed = facts.get("pr") or {}
+    facts: Mapping[str, Any] = report.get("observations") or {}
+    observed: Mapping[str, Any] = facts.get("pr") or {}
     if facts.get("repository") != repository:
         raise PublishError("report repository mismatch")
     if observed.get("number", number) != number:

@@ -1,9 +1,8 @@
 """Checkの現在SHA・公開順・権限境界を、実APIを書き換えず検証する。"""
 
-import unittest
+import pytest
 from copy import deepcopy
 from unittest.mock import patch
-
 from pr_merge_readiness.evaluate import assess
 from pr_merge_readiness.publish import PublishError
 from pr_merge_readiness.publish_checks import (
@@ -69,7 +68,7 @@ class FixtureAPI:
         if body is not None:
             self.writes.append((path, deepcopy(body), method))
             if method == "PATCH":
-                record = next(r for r in self.checks if r["id"] == int(path.rsplit("/", 1)[1]))
+                record = next((r for r in self.checks if r["id"] == int(path.rsplit("/", 1)[1])))
                 record.update(deepcopy(body))
             else:
                 self.checks.append(
@@ -91,198 +90,202 @@ class FixtureAPI:
         raise AssertionError(path)
 
 
-class CheckTests(unittest.TestCase):
-    def test_four_decisions_are_neutral_and_link_to_exact_artifact(self):
-        for decision in (
-            "SHADOW_CONDITIONS_MET",
-            "WAITING",
-            "HUMAN_REVIEW_REQUIRED",
-            "INSUFFICIENT_DATA",
-        ):
-            with self.subTest(decision=decision):
-                api = FixtureAPI()
-                value = report()
-                value["decision"] = decision
-                original = deepcopy(value)
-                self.assertEqual(publish_report(api, 1, value, URL, ARTIFACT), "published")
-                body = api.writes[0][1]
-                self.assertEqual(
-                    (body["head_sha"], body["status"], body["conclusion"]),
-                    (HEAD, "completed", "neutral"),
-                )
-                self.assertIn(decision, body["output"]["title"])
-                self.assertEqual(body["details_url"], URL)
-                for text in (AT, HEAD, BASE, ARTIFACT, value["policy_sha256"], "pr-1.json"):
-                    self.assertIn(text, body["output"]["summary"])
-                self.assertEqual(value, original)
+@pytest.mark.parametrize(
+    "decision", ("SHADOW_CONDITIONS_MET", "WAITING", "HUMAN_REVIEW_REQUIRED", "INSUFFICIENT_DATA")
+)
+def test_four_decisions_are_neutral_and_link_to_exact_artifact(decision):
+    api = FixtureAPI()
+    value = report()
+    value["decision"] = decision
+    original = deepcopy(value)
+    assert publish_report(api, 1, value, URL, ARTIFACT) == "published"
+    body = api.writes[0][1]
+    assert (body["head_sha"], body["status"], body["conclusion"]) == (HEAD, "completed", "neutral")
+    assert decision in body["output"]["title"]
+    assert body["details_url"] == URL
+    for text in (AT, HEAD, BASE, ARTIFACT, value["policy_sha256"], "pr-1.json"):
+        assert text in body["output"]["summary"]
+    assert value == original
 
-    def test_older_reports_and_late_markers_do_not_replace_newer_observation(self):
+
+def test_older_reports_and_late_markers_do_not_replace_newer_observation():
+    api = FixtureAPI()
+    publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
+    publish_report(api, 1, report(), URL, ARTIFACT)
+    mark_event(api, {"pull_request": deepcopy(api.prs[1]), "action": "synchronize"}, URL)
+    assert len(api.writes) == 1
+    assert "SHADOW_CONDITIONS_MET" in api.checks[0]["output"]["title"]
+
+
+def test_marker_then_observation_updates_same_check():
+    api = FixtureAPI()
+    mark_event(api, {"pull_request": deepcopy(api.prs[1]), "action": "opened"}, URL)
+    assert "未観測" in api.checks[0]["output"]["title"]
+    publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
+    assert len(api.checks) == 1
+    assert api.writes[-1][2] == "PATCH"
+
+
+def test_title_edit_does_not_let_delayed_marker_erase_newer_observation():
+    api = FixtureAPI()
+    payload = deepcopy(api.prs[1])
+    publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
+    api.prs[1]["updated_at"] = "2026-09-11T14:00:00+00:00"
+    mark_event(
+        api,
+        {
+            "pull_request": deepcopy(api.prs[1]),
+            "action": "edited",
+            "changes": {"title": {"from": "old"}},
+        },
+        URL,
+    )
+    mark_event(api, {"pull_request": payload, "action": "synchronize"}, URL)
+    publish_report(api, 1, report(), URL, ARTIFACT)
+    assert len(api.writes) == 1
+    assert "SHADOW_CONDITIONS_MET" in api.checks[0]["output"]["title"]
+
+
+def test_new_head_never_inherits_old_conditions_met():
+    api = FixtureAPI()
+    publish_report(api, 1, report(), URL, ARTIFACT)
+    api.prs[1]["head"]["sha"] = "d" * 40
+    publish_report(api, 1, report(), URL, ARTIFACT)
+    body = api.writes[-1][1]
+    assert body["head_sha"] == "d" * 40
+    assert "古いSHA" in body["output"]["title"]
+    assert "SHADOW_CONDITIONS_MET" not in body["output"]["title"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    (
+        {"base": {"sha": "d" * 40, "ref": "other"}},
+        {"draft": True},
+        {"updated_at": LATER},
+        {"state": "closed"},
+    ),
+)
+def test_base_draft_updated_at_and_closed_changes_require_reobservation(change):
+    api = FixtureAPI()
+    api.prs[1].update(change)
+    publish_report(api, 1, report(), URL, ARTIFACT)
+    assert "再観測" in api.writes[0][1]["output"]["title"]
+
+
+def test_same_timestamp_report_expires_existing_ready_check_after_base_change():
+    api = FixtureAPI()
+    publish_report(api, 1, report(), URL, ARTIFACT)
+    api.prs[1]["base"]["sha"] = "d" * 40
+    publish_report(api, 1, report(), URL, ARTIFACT)
+    assert len(api.checks) == 1
+    assert "再観測" in api.checks[0]["output"]["title"]
+
+
+def test_terminal_report_is_published_as_record():
+    api = FixtureAPI()
+    api.prs[1].update(state="closed", merged_at=LATER)
+    value = report()
+    value["observations"]["pr"]["state"] = "MERGED"
+    value["decision"] = "WAITING"
+    publish_report(api, 1, value, URL, ARTIFACT)
+    assert "観測済み" in api.writes[0][1]["output"]["title"]
+
+
+def test_same_head_two_prs_get_separate_checks():
+    api = FixtureAPI()
+    for number in (1, 2):
+        publish_report(api, number, report(number), URL, ARTIFACT)
+    assert {c["name"] for c in api.checks} == {CHECK_PREFIX + "1", CHECK_PREFIX + "2"}
+
+
+def test_foreign_check_is_not_modified():
+    api = FixtureAPI()
+    publish_report(api, 1, report(), URL, ARTIFACT)
+    foreign = deepcopy(api.checks[0])
+    api.checks[0]["app"]["id"] = 7
+    publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
+    assert len(api.checks) == 2
+    assert api.checks[0]["external_id"] == foreign["external_id"]
+
+
+def test_invalid_identity_and_read_failures_never_write():
+    for change in ({"repository": "other/project"}, {"pr": {"number": 3}}):
         api = FixtureAPI()
-        publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
+        value = report()
+        value["observations"].update(change)
+        with pytest.raises(PublishError):
+            publish_report(api, 1, value, URL, ARTIFACT)
+        assert not api.writes
+    api = FixtureAPI()
+    api.failure = "API GET /pulls/1: HTTP 403"
+    with pytest.raises(PublishError):
         publish_report(api, 1, report(), URL, ARTIFACT)
-        mark_event(api, {"pull_request": deepcopy(api.prs[1]), "action": "synchronize"}, URL)
-        self.assertEqual(len(api.writes), 1)
-        self.assertIn("SHADOW_CONDITIONS_MET", api.checks[0]["output"]["title"])
+    assert not api.writes
 
-    def test_marker_then_observation_updates_same_check(self):
-        api = FixtureAPI()
-        mark_event(api, {"pull_request": deepcopy(api.prs[1]), "action": "opened"}, URL)
-        self.assertIn("未観測", api.checks[0]["output"]["title"])
-        publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
-        self.assertEqual(len(api.checks), 1)
-        self.assertEqual(api.writes[-1][2], "PATCH")
 
-    def test_title_edit_does_not_let_delayed_marker_erase_newer_observation(self):
-        api = FixtureAPI()
-        payload = deepcopy(api.prs[1])
-        publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
-        api.prs[1]["updated_at"] = "2026-09-11T14:00:00+00:00"
+def test_last_moment_pr_change_never_writes():
+    api = FixtureAPI()
+    api.drift = {"head": {"sha": "d" * 40}}
+    with pytest.raises(PublishError, match="changed before"):
+        publish_report(api, 1, report(), URL, ARTIFACT)
+    assert not api.writes
+
+
+def test_review_text_is_escaped():
+    api = FixtureAPI()
+    value = report()
+    value["conditions"][0]["detail"] = "<script>@someone</script>"
+    publish_report(api, 1, value, URL, ARTIFACT)
+    summary = api.writes[0][1]["output"]["summary"]
+    assert "<script>" not in summary
+    assert "&lt;script&gt;" in summary
+
+
+def test_old_head_event_and_title_only_edit_are_ignored():
+    api = FixtureAPI()
+    payload = deepcopy(api.prs[1])
+    api.prs[1]["head"]["sha"] = "d" * 40
+    assert mark_event(api, {"pull_request": payload, "action": "synchronize"}, URL) == []
+    assert (
         mark_event(
             api,
-            {
-                "pull_request": deepcopy(api.prs[1]),
-                "action": "edited",
-                "changes": {"title": {"from": "old"}},
-            },
+            {"pull_request": api.prs[1], "action": "edited", "changes": {"title": {"from": "old"}}},
             URL,
         )
-        mark_event(api, {"pull_request": payload, "action": "synchronize"}, URL)
-        publish_report(api, 1, report(), URL, ARTIFACT)
-        self.assertEqual(len(api.writes), 1)
-        self.assertIn("SHADOW_CONDITIONS_MET", api.checks[0]["output"]["title"])
-
-    def test_new_head_never_inherits_old_conditions_met(self):
-        api = FixtureAPI()
-        publish_report(api, 1, report(), URL, ARTIFACT)
-        api.prs[1]["head"]["sha"] = "d" * 40
-        publish_report(api, 1, report(), URL, ARTIFACT)
-        body = api.writes[-1][1]
-        self.assertEqual(body["head_sha"], "d" * 40)
-        self.assertIn("古いSHA", body["output"]["title"])
-        self.assertNotIn("SHADOW_CONDITIONS_MET", body["output"]["title"])
-
-    def test_base_draft_updated_at_and_closed_changes_require_reobservation(self):
-        for change in (
-            {"base": {"sha": "d" * 40, "ref": "other"}},
-            {"draft": True},
-            {"updated_at": LATER},
-            {"state": "closed"},
-        ):
-            api = FixtureAPI()
-            api.prs[1].update(change)
-            publish_report(api, 1, report(), URL, ARTIFACT)
-            self.assertIn("再観測", api.writes[0][1]["output"]["title"])
-
-    def test_same_timestamp_report_expires_existing_ready_check_after_base_change(self):
-        api = FixtureAPI()
-        publish_report(api, 1, report(), URL, ARTIFACT)
-        api.prs[1]["base"]["sha"] = "d" * 40
-        publish_report(api, 1, report(), URL, ARTIFACT)
-        self.assertEqual(len(api.checks), 1)
-        self.assertIn("再観測", api.checks[0]["output"]["title"])
-
-    def test_terminal_report_is_published_as_record(self):
-        api = FixtureAPI()
-        api.prs[1].update(state="closed", merged_at=LATER)
-        value = report()
-        value["observations"]["pr"]["state"] = "MERGED"
-        value["decision"] = "WAITING"
-        publish_report(api, 1, value, URL, ARTIFACT)
-        self.assertIn("観測済み", api.writes[0][1]["output"]["title"])
-
-    def test_same_head_two_prs_get_separate_checks(self):
-        api = FixtureAPI()
-        for number in (1, 2):
-            publish_report(api, number, report(number), URL, ARTIFACT)
-        self.assertEqual({c["name"] for c in api.checks}, {CHECK_PREFIX + "1", CHECK_PREFIX + "2"})
-
-    def test_foreign_check_is_not_modified(self):
-        api = FixtureAPI()
-        publish_report(api, 1, report(), URL, ARTIFACT)
-        foreign = deepcopy(api.checks[0])
-        api.checks[0]["app"]["id"] = 7
-        publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
-        self.assertEqual(len(api.checks), 2)
-        self.assertEqual(api.checks[0]["external_id"], foreign["external_id"])
-
-    def test_invalid_identity_and_read_failures_never_write(self):
-        for change in ({"repository": "other/project"}, {"pr": {"number": 3}}):
-            api = FixtureAPI()
-            value = report()
-            value["observations"].update(change)
-            with self.assertRaises(PublishError):
-                publish_report(api, 1, value, URL, ARTIFACT)
-            self.assertFalse(api.writes)
-        api = FixtureAPI()
-        api.failure = "API GET /pulls/1: HTTP 403"
-        with self.assertRaises(PublishError):
-            publish_report(api, 1, report(), URL, ARTIFACT)
-        self.assertFalse(api.writes)
-
-    def test_last_moment_pr_change_never_writes(self):
-        api = FixtureAPI()
-        api.drift = {"head": {"sha": "d" * 40}}
-        with self.assertRaisesRegex(PublishError, "changed before"):
-            publish_report(api, 1, report(), URL, ARTIFACT)
-        self.assertFalse(api.writes)
-
-    def test_review_text_is_escaped(self):
-        api = FixtureAPI()
-        value = report()
-        value["conditions"][0]["detail"] = "<script>@someone</script>"
-        publish_report(api, 1, value, URL, ARTIFACT)
-        summary = api.writes[0][1]["output"]["summary"]
-        self.assertNotIn("<script>", summary)
-        self.assertIn("&lt;script&gt;", summary)
-
-    def test_old_head_event_and_title_only_edit_are_ignored(self):
-        api = FixtureAPI()
-        payload = deepcopy(api.prs[1])
-        api.prs[1]["head"]["sha"] = "d" * 40
-        self.assertEqual(
-            mark_event(api, {"pull_request": payload, "action": "synchronize"}, URL), []
-        )
-        self.assertEqual(
-            mark_event(
-                api,
-                {
-                    "pull_request": api.prs[1],
-                    "action": "edited",
-                    "changes": {"title": {"from": "old"}},
-                },
-                URL,
-            ),
-            [],
-        )
-        self.assertFalse(api.writes)
-
-    def test_ci_start_targets_current_head_merge_or_push_base_only(self):
-        for event, head, count in (
-            ("pull_request", MERGE, 2),
-            ("pull_request", HEAD, 2),
-            ("push", BASE, 2),
-            ("pull_request", "e" * 40, 0),
-        ):
-            api = FixtureAPI()
-            api.run.update(event=event, head_sha=head)
-            results = mark_event(api, {"workflow_run": deepcopy(api.run)}, URL)
-            self.assertEqual(len(results), count)
-            self.assertTrue(all(c["conclusion"] == "neutral" for c in api.checks))
-
-    def test_completed_ci_and_old_attempt_start_do_not_erase_results(self):
-        for change in ({"status": "completed"}, {"run_attempt": 3}):
-            api = FixtureAPI()
-            payload = deepcopy(api.run)
-            api.run.update(change)
-            self.assertEqual(mark_event(api, {"workflow_run": payload}, URL), [])
-            self.assertFalse(api.writes)
-
-    def test_check_pagination_cannot_return_truncated_success(self):
-        api = FixtureAPI()
-        with patch.object(api, "request", return_value={"total_count": 2, "check_runs": []}):
-            with self.assertRaisesRegex(PublishError, "count mismatch"):
-                managed_checks(api, 1, HEAD)
+        == []
+    )
+    assert not api.writes
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.mark.parametrize(
+    "event,head,count",
+    (
+        ("pull_request", MERGE, 2),
+        ("pull_request", HEAD, 2),
+        ("push", BASE, 2),
+        ("pull_request", "e" * 40, 0),
+    ),
+)
+def test_ci_start_targets_current_head_merge_or_push_base_only(event, head, count):
+    api = FixtureAPI()
+    api.run.update(event=event, head_sha=head)
+    results = mark_event(api, {"workflow_run": deepcopy(api.run)}, URL)
+    assert len(results) == count
+    assert all((c["conclusion"] == "neutral" for c in api.checks))
+
+
+@pytest.mark.parametrize("change", ({"status": "completed"}, {"run_attempt": 3}))
+def test_completed_ci_and_old_attempt_start_do_not_erase_results(change):
+    api = FixtureAPI()
+    payload = deepcopy(api.run)
+    api.run.update(change)
+    assert mark_event(api, {"workflow_run": payload}, URL) == []
+    assert not api.writes
+
+
+def test_check_pagination_cannot_return_truncated_success():
+    api = FixtureAPI()
+    with patch.object(api, "request", return_value={"total_count": 2, "check_runs": []}):
+        with pytest.raises(PublishError, match="count mismatch"):
+            managed_checks(api, 1, HEAD)

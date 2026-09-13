@@ -25,11 +25,44 @@ class RequiredStatus(TypedDict):
 RequiredCheck = RequiredCheckRun | RequiredStatus
 
 
-class Policy(TypedDict):
+class ReviewConfig(TypedDict):
     minimum_approvals: int
     require_resolved_threads: bool
-    required_checks: list[RequiredCheck]
     stale_change_review_days: int
+
+
+class Policy(ReviewConfig):
+    required_checks: list[RequiredCheck]
+
+
+class CIConfig(TypedDict):
+    workflows: list[str]
+    required_checks: list[RequiredCheck]
+
+
+class PublicationConfig(TypedDict):
+    checks: bool
+    labels: Literal["manual", "off"]
+
+
+class Config(TypedDict):
+    version: Literal[1]
+    action_ref: str
+    ci: CIConfig
+    review: ReviewConfig
+    publication: PublicationConfig
+
+
+class Source(TypedDict):
+    repository: str
+    sha: str
+    path: str
+
+
+class Provenance(TypedDict):
+    evaluator: Source
+    config: Source
+    workflow: Source | None
 
 
 class PullRequest(TypedDict):
@@ -156,7 +189,8 @@ class Condition(TypedDict):
 
 class Assessment(TypedDict):
     format: Literal["pr-merge-readiness/report"]
-    provenance: dict[str, Any]
+    # 純粋な評価の後、保存前に信頼済みソース情報を付与する。
+    provenance: NotRequired[Provenance]
     schema_version: Literal[1]
     mode: Literal["shadow"]
     decision: Decision
@@ -169,14 +203,15 @@ class Assessment(TypedDict):
 class Manifest(TypedDict):
     format: Literal["pr-merge-readiness/manifest"]
     schema_version: Literal[1]
-    provenance: dict[str, Any]
+    provenance: Provenance
     artifact_name: str
     repository: str
-    run_id: str | None
-    run_attempt: str | None
+    run_id: str
+    run_attempt: str
     started_at: str
     reports: list[str]
     collection_failed: bool
+    selection: Literal["single_pr", "all_open"]
 
 
 class EvaluationError(ValueError):

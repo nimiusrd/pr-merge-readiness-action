@@ -24,9 +24,12 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: .readiness-action
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          python-version: '3.11'
+          version: '0.12.13'
+          python-version: '3.14'
+          enable-cache: false
+      - run: uv python install --no-config 3.14
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: proposed
@@ -40,4 +43,4 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: |
           test "$ACTION_REF" = "$WORKFLOW_SHA"
-          python3 -I -B ../.readiness-action/cli.py generate-workflow --config "$CONFIG_PATH" --output "$OUTPUT_PATH" --check
+          bash ../.readiness-action/run.sh generate-workflow --config "$CONFIG_PATH" --output "$OUTPUT_PATH" --check

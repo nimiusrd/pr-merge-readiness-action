@@ -6,7 +6,9 @@ import json
 import os
 import subprocess
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from . import publish, publish_checks
@@ -20,13 +22,13 @@ from .config import (
     relative_path,
     validate_config,
 )
-from .contracts import EvaluationError, sha
+from .contracts import Config, EvaluationError, sha
 from .observe import observe
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def output(values: dict) -> None:
+def output(values: Mapping[str, object]) -> None:
     destination = os.environ.get("GITHUB_OUTPUT")
     if destination:
         with Path(destination).open("a") as stream:
@@ -53,7 +55,7 @@ def verify_source(expected: str, workflow_sha: str = "") -> None:
             raise EvaluationError("Action source reference mismatch; pin a full SHA")
     else:
         # ローカル Action の場合も、親にある利用側 checkout の SHA で代用しない。
-        def git(*args):
+        def git(*args: str) -> str:
             return subprocess.run(
                 ["git", "-C", str(ROOT), *args], check=True, capture_output=True, text=True
             ).stdout.strip()
@@ -72,7 +74,7 @@ def verify_source(expected: str, workflow_sha: str = "") -> None:
             raise EvaluationError("reusable workflow identity mismatch")
 
 
-def trusted_config(api, path: str, config_sha: str, action_ref: str) -> tuple[dict, str]:
+def trusted_config(api: GitHub, path: str, config_sha: str, action_ref: str) -> tuple[Config, str]:
     relative_path(path)
     if not config_sha:
         branch = api.request(api.prefix)["default_branch"]
@@ -89,7 +91,9 @@ def trusted_config(api, path: str, config_sha: str, action_ref: str) -> tuple[di
     return config, config_sha
 
 
-def route(event_name: str, event: dict, config: dict, pr_number: str, update_labels: bool) -> str:
+def route(
+    event_name: str, event: dict[str, Any], config: Config, pr_number: str, update_labels: bool
+) -> str:
     if pr_number:
         positive(pr_number)
     if event_name != "workflow_dispatch" and (pr_number or update_labels):
@@ -102,7 +106,7 @@ def route(event_name: str, event: dict, config: dict, pr_number: str, update_lab
         run = event["workflow_run"]
         if run["name"] not in config["ci"]["workflows"]:
             return "skip"
-        return {"in_progress": "mark", "completed": "observe"}.get(event.get("action"), "skip")
+        return {"in_progress": "mark", "completed": "observe"}.get(event.get("action", ""), "skip")
     if event_name == "pull_request_target":
         action = event.get("action")
         if action == "closed":

@@ -1,9 +1,11 @@
 """利用側 TOML を厳密に検証し、評価用 policy に正規化する。"""
 
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
+from typing import Any, cast
 
-from .contracts import EvaluationError, boolean, integer, sha, string
+from .contracts import Config, EvaluationError, Policy, boolean, integer, sha, string
 from .evaluate import validate_policy
 
 ACTION_REPOSITORY = "nimiusrd/pr-merge-readiness-action"
@@ -12,7 +14,7 @@ CONFIG_PATH = ".github/pr-merge-readiness.toml"
 CALLER_PATH = ".github/workflows/pr-merge-readiness.yml"
 
 
-def keys(value, required, optional=()):
+def keys(value: object, required: Iterable[str], optional: Iterable[str] = ()) -> None:
     if not isinstance(value, dict):
         raise EvaluationError("table required")
     missing = set(required) - value.keys()
@@ -36,7 +38,7 @@ def relative_path(value: str) -> str:
     return value
 
 
-def validate_config(value: dict) -> dict:
+def validate_config(value: dict[str, Any]) -> Config:
     keys(value, {"version", "action_ref", "ci", "review"}, {"publication"})
     if type(value["version"]) is not int or value["version"] != 1:
         raise EvaluationError("unsupported config version")
@@ -62,23 +64,28 @@ def validate_config(value: dict) -> dict:
         if not isinstance(check, dict) or check.get("kind") not in {"check_run", "status"}:
             raise EvaluationError("unknown check kind")
         keys(check, {"kind", "name", "app_id" if check["kind"] == "check_run" else "creator"})
-    validate_policy({**value["review"], "required_checks": checks})
+    validate_policy(cast(Policy, {**value["review"], "required_checks": checks}))
     publication = value.get("publication", {})
     keys(publication, set(), {"checks", "labels"})
     publication = {"checks": True, "labels": "manual", **publication}
     boolean(publication["checks"], "publication.checks")
     if publication["labels"] not in ("manual", "off"):
         raise EvaluationError("publication.labels must be manual or off")
-    return {**value, "publication": publication}
+    return cast(Config, {**value, "publication": publication})
 
 
-def load_config(path: Path) -> dict:
+def load_config(path: Path) -> Config:
     with path.open("rb") as stream:
         return validate_config(tomllib.load(stream))
 
 
-def policy_from(config: dict) -> dict:
-    return {**config["review"], "required_checks": config["ci"]["required_checks"]}
+def policy_from(config: Config) -> Policy:
+    return {
+        "minimum_approvals": config["review"]["minimum_approvals"],
+        "require_resolved_threads": config["review"]["require_resolved_threads"],
+        "stale_change_review_days": config["review"]["stale_change_review_days"],
+        "required_checks": config["ci"]["required_checks"],
+    }
 
 
 def positive(value: str) -> int:

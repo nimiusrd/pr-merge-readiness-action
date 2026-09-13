@@ -7,6 +7,8 @@ import hashlib
 import html
 import json
 from datetime import datetime, timezone
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import quote
 
 from .contracts import Assessment
@@ -25,13 +27,13 @@ def timestamp(value: str) -> datetime:
     return result
 
 
-def positive(value) -> int:
+def positive(value: Any) -> int:
     if isinstance(value, bool) or not str(value).isdigit() or int(value) <= 0:
         raise PublishError("positive integer required")
     return int(value)
 
 
-def snapshot(pr: dict) -> dict:
+def snapshot(pr: dict[str, Any]) -> dict[str, Any]:
     return {
         "number": positive(pr["number"]),
         "head_sha": pr["head"]["sha"],
@@ -43,22 +45,22 @@ def snapshot(pr: dict) -> dict:
     }
 
 
-def code(value) -> str:
+def code(value: object) -> str:
     return "<code>" + html.escape(str(value)) + "</code>"
 
 
-def state_hash(current: dict) -> str:
+def state_hash(current: dict[str, Any]) -> str:
     # タイトル・本文・コメントでも変わる時刻は、遅延イベントの失効判定に使わない。
     # 観測と公開直前の鮮度比較ではsnapshotのupdated_atを引き続き照合する。
     state = {key: value for key, value in current.items() if key != "updated_at"}
     return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
 
 
-def check_time(record: dict) -> datetime:
+def check_time(record: dict[str, Any]) -> datetime:
     return timestamp(record["external_id"].split(":", 2)[2].split("|", 1)[0])
 
 
-def managed_checks(api: GitHub, number: int, head: str) -> list:
+def managed_checks(api: GitHub, number: int, head: str) -> list[dict[str, Any]]:
     """現在SHAの自分のCheckだけを読む。workflow/run履歴は走査しない。"""
     records = []
     name = CHECK_PREFIX + str(number)
@@ -87,7 +89,9 @@ def managed_checks(api: GitHub, number: int, head: str) -> list:
     ]
 
 
-def write_check(api: GitHub, current: dict, at: str, title: str, summary: str, run_url: str) -> str:
+def write_check(
+    api: GitHub, current: dict[str, Any], at: str, title: str, summary: str, run_url: str
+) -> str:
     number = current["number"]
     incoming = timestamp(at)
     existing = managed_checks(api, number, current["head_sha"])
@@ -126,7 +130,7 @@ def write_check(api: GitHub, current: dict, at: str, title: str, summary: str, r
     return "published"
 
 
-def heading(current: dict, run_url: str) -> str:
+def heading(current: dict[str, Any], run_url: str) -> str:
     return (
         "観測時点の参考表示です。自動マージ許可・必須CIではありません。\n\n"
         f"PR: #{current['number']} / 表示対象head: {code(current['head_sha'])}\n\n"
@@ -140,7 +144,7 @@ def publish_report(
 ) -> str:
     decision = report["decision"]
     facts = report["observations"]
-    observed = facts.get("pr") or {}
+    observed: Mapping[str, Any] = facts.get("pr") or {}
     if decision not in DECISION_LABELS or facts["repository"] != api.repository:
         raise PublishError("report decision or repository mismatch")
     if observed.get("number", number) != number:
@@ -157,13 +161,14 @@ def publish_report(
     else:
         title = "観測済み：" + decision
     summary = heading(current, run_url)
+    source = report.get("provenance")
     if not agrees:
         summary += "保存した観測と公開時のPR状態が一致しません。以下は過去の記録です。\n\n"
     summary += (
         f"観測時刻: {code(at)}\n\n"
         f"観測head: {code(observed.get('head_sha'))}\n\n"
         f"観測base: {code(observed.get('base_sha'))}\n\n"
-        f"評価器SHA: {code(report.get('provenance', {}).get('evaluator', {}).get('sha'))}\n\n"
+        f"評価器SHA: {code(source['evaluator']['sha'] if source else None)}\n\n"
         f"Policy SHA-256: {code(report['policy_sha256'])}\n\n"
         f"保存した判定: {code(decision)}\n\n"
         f"Artifact: {code(artifact)} / {code(f'pr-{number}.json')}\n\n"
@@ -178,7 +183,7 @@ def publish_report(
     return write_check(api, current, at, title, summary, run_url)
 
 
-def mark_event(api: GitHub, event: dict, run_url: str) -> list:
+def mark_event(api: GitHub, event: dict[str, Any], run_url: str) -> list[dict[str, Any]]:
     candidates = []
     if "pull_request" in event:
         payload = event["pull_request"]
