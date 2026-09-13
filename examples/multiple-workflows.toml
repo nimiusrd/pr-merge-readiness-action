@@ -1,7 +1,7 @@
 # 架空の複数 workflow 構成例です。特定のリポジトリの設定ではありません。
 # workflow・Check 名と action_ref を利用先の実際の値に置き換えてください。
 version = 1
-action_ref = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+action_ref = "b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7"
 
 [ci]
 workflows = ["Build", "Quality", "Security"]

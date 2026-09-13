@@ -29,10 +29,10 @@ jobs:
       checks: read
       statuses: read
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # 公開済み release SHA に置換
+      - uses: nimiusrd/pr-merge-readiness-action@b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7 # v0.3.0
         with:
           operation: observe
-          action-ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          action-ref: b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
           pr-number: ${{ inputs.pr-number }}
           report-dir: readiness-report
           artifact-name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
@@ -45,7 +45,7 @@ jobs:
           retention-days: 30
 ```
 
-`uses:`、入力 `action-ref`、設定 `action_ref` には、同じ release の **40 桁 commit SHA** を指定します。例の `aaaa...` は、[公開済み release](https://github.com/nimiusrd/pr-merge-readiness-action/releases) の SHA に置き換えてください。更新時は 3 箇所を合わせて変更してください。
+`uses:`、入力 `action-ref`、設定 `action_ref` には、同じ release の **40 桁 commit SHA** を指定します。この例は [v0.3.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.3.0) の SHA に固定しています。更新時は 3 箇所を合わせて変更してください。
 
 Action が Python と自身の実装を用意し、呼び出したリポジトリの設定と PR を GitHub API から読み取ります。利用側に Python の導入、Action ソースのコピー、checkout step は必要ありません。設定は default branch から読み、その commit SHA を出力します。
 
@@ -67,7 +67,7 @@ Action が Python と自身の実装を用意し、呼び出したリポジト�
 
 ```toml
 version = 1
-action_ref = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" # 公開済み release SHA に置換
+action_ref = "b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7" # v0.3.0
 
 [ci]
 workflows = ["CI"]
