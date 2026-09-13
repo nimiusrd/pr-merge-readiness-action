@@ -1,65 +1,67 @@
-name: PR Merge Readiness Runtime
+# Copy this workflow and minimal.toml to your repository's .github directory.
+# Replace every aaaa... reference with the same released Action commit SHA.
+name: PR Merge Readiness
 
 on:
-  workflow_call:
+  workflow_run:
+    workflows: [CI] # Match ci.workflows in the TOML configuration.
+    types: [in_progress, completed]
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review, converted_to_draft, closed]
+  workflow_dispatch:
     inputs:
-      config-path:
-        type: string
-        required: true
-      action-ref:
-        type: string
-        required: true
       pr-number:
+        description: PR number (empty = all open PRs)
         type: string
         default: ''
       update-labels:
+        description: Update labels for all open PRs
         type: boolean
         default: false
+  pull_request:
+    paths: [.github/pr-merge-readiness.toml, .github/workflows/pr-merge-readiness.yml]
+  push:
+    paths: [.github/pr-merge-readiness.toml, .github/workflows/pr-merge-readiness.yml]
 
-permissions:
-  contents: read
+permissions: {}
 
-# ラベル更新全体を単一 writer にする。他の run は同じキューを共有しない。
 concurrency:
   group: ${{ inputs.update-labels && 'autonomous-merge-labels' || format('readiness-{0}-{1}', github.run_id, github.run_attempt) }}
   cancel-in-progress: false
 
 jobs:
-  prepare:
+  validate:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: nimiusrd/pr-merge-readiness-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        with:
+          operation: validate-config
+          action-ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          config-path: .github/pr-merge-readiness.toml
+          config-sha: ${{ github.event.pull_request.head.sha || github.sha }}
+
+  prepare:
+    if: github.event_name != 'pull_request' && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       config-sha: ${{ steps.prepare.outputs.config-sha }}
       operation: ${{ steps.prepare.outputs.operation }}
       checks: ${{ steps.prepare.outputs.checks }}
       labels: ${{ steps.prepare.outputs.labels }}
+      pr-number: ${{ steps.prepare.outputs.pr-number }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .readiness-action
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
-        with:
-          version: '0.12.13'
-          python-version: '3.14'
-          enable-cache: false
-      - run: uv python install --no-config 3.14
       - id: prepare
-        env:
-          PMR_WORKFLOW_SHA: ${{ job.workflow_sha }}
-          PMR_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
-          PMR_WORKFLOW_PATH: ${{ job.workflow_file_path }}
-          GH_TOKEN: ${{ github.token }}
-          CONFIG_PATH: ${{ inputs.config-path }}
-          ACTION_REF: ${{ inputs.action-ref }}
-          PR_NUMBER: ${{ inputs.pr-number }}
-          UPDATE_LABELS: ${{ inputs.update-labels }}
-        run: >-
-          bash .readiness-action/run.sh prepare
-          --config-path "$CONFIG_PATH" --action-ref "$ACTION_REF"
-          --pr-number "$PR_NUMBER" --update-labels "$UPDATE_LABELS"
+        uses: nimiusrd/pr-merge-readiness-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        with:
+          operation: prepare
+          action-ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       - name: Save preparation failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -83,21 +85,10 @@ jobs:
       checks: write
       actions: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .readiness-action
-          persist-credentials: false
-      - uses: ./.readiness-action
-        env:
-          PMR_WORKFLOW_SHA: ${{ job.workflow_sha }}
-          PMR_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
-          PMR_WORKFLOW_PATH: ${{ job.workflow_file_path }}
+      - uses: nimiusrd/pr-merge-readiness-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         with:
           operation: mark
-          action-ref: ${{ inputs.action-ref }}
-          config-path: ${{ inputs.config-path }}
+          action-ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           config-sha: ${{ needs.prepare.outputs.config-sha }}
 
   observe:
@@ -111,23 +102,12 @@ jobs:
       checks: read
       statuses: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .readiness-action
-          persist-credentials: false
-      - uses: ./.readiness-action
-        env:
-          PMR_WORKFLOW_SHA: ${{ job.workflow_sha }}
-          PMR_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
-          PMR_WORKFLOW_PATH: ${{ job.workflow_file_path }}
+      - uses: nimiusrd/pr-merge-readiness-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         with:
           operation: observe
-          action-ref: ${{ inputs.action-ref }}
-          config-path: ${{ inputs.config-path }}
+          action-ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           config-sha: ${{ needs.prepare.outputs.config-sha }}
-          pr-number: ${{ inputs.pr-number }}
+          pr-number: ${{ needs.prepare.outputs.pr-number }}
           report-dir: readiness-report
           artifact-name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Save this attempt's observations
@@ -152,25 +132,14 @@ jobs:
       pull-requests: read
       checks: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .readiness-action
-          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
           path: readiness-report
-      - uses: ./.readiness-action
-        env:
-          PMR_WORKFLOW_SHA: ${{ job.workflow_sha }}
-          PMR_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
-          PMR_WORKFLOW_PATH: ${{ job.workflow_file_path }}
+      - uses: nimiusrd/pr-merge-readiness-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         with:
           operation: publish-checks
-          action-ref: ${{ inputs.action-ref }}
-          config-path: ${{ inputs.config-path }}
+          action-ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           config-sha: ${{ needs.prepare.outputs.config-sha }}
           report-dir: readiness-report
           artifact-name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
@@ -185,25 +154,14 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .readiness-action
-          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
           path: readiness-report
-      - uses: ./.readiness-action
-        env:
-          PMR_WORKFLOW_SHA: ${{ job.workflow_sha }}
-          PMR_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
-          PMR_WORKFLOW_PATH: ${{ job.workflow_file_path }}
+      - uses: nimiusrd/pr-merge-readiness-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         with:
           operation: publish-labels
-          action-ref: ${{ inputs.action-ref }}
-          config-path: ${{ inputs.config-path }}
+          action-ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           config-sha: ${{ needs.prepare.outputs.config-sha }}
           report-dir: readiness-report
           artifact-name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}

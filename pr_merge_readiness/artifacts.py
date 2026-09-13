@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Final, cast
 
-from .config import ACTION_REPOSITORY, WORKFLOW_PATH, positive, relative_path
+from .config import ACTION_REPOSITORY, positive, relative_path
 from .contracts import Assessment, EvaluationError, Policy, Provenance, sha
 from .evaluate import validate_policy
 
@@ -17,9 +17,7 @@ def fingerprint(policy: Policy) -> str:
     return hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest()
 
 
-def provenance(
-    repository: str, action_sha: str, config_sha: str, config_path: str, workflow_sha: str = ""
-) -> Provenance:
+def provenance(repository: str, action_sha: str, config_sha: str, config_path: str) -> Provenance:
     return {
         "evaluator": {
             "repository": ACTION_REPOSITORY,
@@ -31,13 +29,7 @@ def provenance(
             "sha": sha(config_sha),
             "path": relative_path(config_path),
         },
-        "workflow": {
-            "repository": ACTION_REPOSITORY,
-            "sha": sha(workflow_sha),
-            "path": WORKFLOW_PATH,
-        }
-        if workflow_sha
-        else None,
+        "workflow": None,
     }
 
 
@@ -67,12 +59,9 @@ def validate_report(report: dict[str, Any]) -> Assessment:
         source["evaluator"]["sha"],
         source["config"]["sha"],
         source["config"]["path"],
-        source["workflow"]["sha"] if source["workflow"] is not None else "",
     )
     if source != expected:
         raise EvaluationError("invalid provenance")
-    if source["workflow"] and source["workflow"]["sha"] != source["evaluator"]["sha"]:
-        raise EvaluationError("workflow/evaluator SHA mismatch")
     return cast(Assessment, report)
 
 

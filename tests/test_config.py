@@ -1,14 +1,11 @@
-"""設定契約と生成物の不一致は成功扱いしない。"""
+"""設定の欠落・型不正・不正な固定参照は成功扱いしない。"""
 
 import pytest
 import copy
-import os
 import tempfile
 from pathlib import Path
-import yaml
 from pr_merge_readiness.config import load_config, policy_from, relative_path, validate_config
 from pr_merge_readiness.contracts import EvaluationError
-from pr_merge_readiness.generate import generate_workflow, render
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -107,35 +104,6 @@ def test_toml_duplicate_key_is_rejected():
         path.write_text("version = 1\nversion = 1\n")
         with pytest.raises(ValueError):
             load_config(path)
-
-
-def test_yaml_quotes_names_and_generates_fixed_references():
-    value = config()
-    value["ci"]["workflows"] = ["CI: ['x'] # quote", "日本語"]
-    first = render(value, ".github/config.toml", ".github/workflows/readiness.yml")
-    assert first == render(value, ".github/config.toml", ".github/workflows/readiness.yml")
-    document = yaml.load(first, Loader=yaml.BaseLoader)
-    assert document["on"]["workflow_run"]["workflows"] == value["ci"]["workflows"]
-    for job in document["jobs"].values():
-        assert job["uses"].endswith("@" + value["action_ref"])
-        assert job["with"]["action-ref"] == value["action_ref"]
-
-
-def test_check_detects_missing_and_changed_files_without_writing():
-    with tempfile.TemporaryDirectory() as directory:
-        old = Path.cwd()
-        os.chdir(directory)
-        try:
-            path = Path(".github/workflows/readiness.yml")
-            assert generate_workflow(config(), Path("config.toml"), path, True) == 1
-            assert not path.exists()
-            assert generate_workflow(config(), Path("config.toml"), path, False) == 0
-            assert generate_workflow(config(), Path("config.toml"), path, True) == 0
-            path.write_text("# manual edit\n")
-            assert generate_workflow(config(), Path("config.toml"), path, True) == 1
-            assert path.read_text() == "# manual edit\n"
-        finally:
-            os.chdir(old)
 
 
 @pytest.mark.parametrize(

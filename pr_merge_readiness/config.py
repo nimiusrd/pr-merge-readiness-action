@@ -9,9 +9,7 @@ from .contracts import Config, EvaluationError, Policy, boolean, integer, sha, s
 from .evaluate import validate_policy
 
 ACTION_REPOSITORY = "nimiusrd/pr-merge-readiness-action"
-WORKFLOW_PATH = ".github/workflows/readiness.yml"
 CONFIG_PATH = ".github/pr-merge-readiness.toml"
-CALLER_PATH = ".github/workflows/pr-merge-readiness.yml"
 
 
 def keys(value: object, required: Iterable[str], optional: Iterable[str] = ()) -> None:

@@ -1,4 +1,4 @@
-"""Composite Action と共通 workflow の入力・信頼境界。"""
+"""Composite Action の入力・信頼境界。"""
 
 import base64
 import html
@@ -16,7 +16,6 @@ from .artifacts import MANIFEST_FORMAT, artifact_name, load_reports, provenance,
 from .collect import GitHub
 from .config import (
     ACTION_REPOSITORY,
-    WORKFLOW_PATH,
     policy_from,
     positive,
     relative_path,
@@ -46,7 +45,7 @@ def summary(path: Path) -> None:
             stream.write(path.read_text())
 
 
-def verify_source(expected: str, workflow_sha: str = "") -> None:
+def verify_source(expected: str) -> None:
     sha(expected)
     context_ref = os.environ.get("PMR_SOURCE_REF", "")
     context_repository = os.environ.get("PMR_SOURCE_REPOSITORY", "")
@@ -65,13 +64,6 @@ def verify_source(expected: str, workflow_sha: str = "") -> None:
             or git("rev-parse", "HEAD") != expected
         ):
             raise EvaluationError("local Action checkout SHA mismatch")
-    if workflow_sha:
-        if (
-            sha(workflow_sha) != expected
-            or os.environ.get("PMR_WORKFLOW_REPOSITORY") != ACTION_REPOSITORY
-            or os.environ.get("PMR_WORKFLOW_PATH") != WORKFLOW_PATH
-        ):
-            raise EvaluationError("reusable workflow identity mismatch")
 
 
 def trusted_config(api: GitHub, path: str, config_sha: str, action_ref: str) -> tuple[Config, str]:
@@ -125,11 +117,20 @@ def route(
     return "skip"
 
 
-def prepare(config_path: str, action_ref: str, pr_number: str, update_labels: bool) -> int:
-    verify_source(action_ref, os.environ.get("PMR_WORKFLOW_SHA", ""))
-    api = GitHub(os.environ["GITHUB_REPOSITORY"])
-    config, config_sha = trusted_config(api, config_path, "", action_ref)
+def prepare(config: Config, config_sha: str) -> int:
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+    inputs = event.get("inputs", {})
+    if inputs is None:
+        inputs = {}
+    if not isinstance(inputs, dict):
+        raise EvaluationError("manual inputs must be an object")
+    pr_number = inputs.get("pr-number", "")
+    labels = inputs.get("update-labels", False)
+    if not isinstance(pr_number, str) or not (
+        type(labels) is bool or isinstance(labels, str) and labels in ("true", "false")
+    ):
+        raise EvaluationError("invalid manual inputs")
+    update_labels = labels in ("true", True)
     operation = route(os.environ["GITHUB_EVENT_NAME"], event, config, pr_number, update_labels)
     if operation == "mark" and not config["publication"]["checks"]:
         operation = "skip"
@@ -139,6 +140,7 @@ def prepare(config_path: str, action_ref: str, pr_number: str, update_labels: bo
             "operation": operation,
             "checks": str(config["publication"]["checks"]).lower(),
             "labels": str(update_labels).lower(),
+            "pr-number": pr_number,
         }
     )
     return 0
@@ -160,9 +162,23 @@ def run_action() -> int:
         )
     }
     operation = values["operation"]
-    if operation not in {"observe", "mark", "publish-checks", "publish-labels"}:
+    if operation not in {
+        "prepare",
+        "validate-config",
+        "observe",
+        "mark",
+        "publish-checks",
+        "publish-labels",
+    }:
         raise EvaluationError("unknown operation")
     publishing = operation.startswith("publish-")
+    if operation in {"prepare", "validate-config"}:
+        if any(values[key] for key in ("pr-number", "event-path", "report-dir", "artifact-name")):
+            raise EvaluationError("configuration operations do not take PR/event/report inputs")
+        if operation == "prepare" and values["config-sha"]:
+            raise EvaluationError("prepare resolves the default branch once")
+        if operation == "validate-config" and not values["config-sha"]:
+            raise EvaluationError("validate-config requires an explicit proposal config-sha")
     if (publishing and (values["pr-number"] or values["event-path"])) or (
         operation == "mark" and values["pr-number"]
     ):
@@ -171,8 +187,7 @@ def run_action() -> int:
         raise EvaluationError("publication requires the observation config-sha")
     if operation == "mark" and (values["report-dir"] or values["artifact-name"]):
         raise EvaluationError("mark does not use reports or artifacts")
-    workflow_sha = os.environ.get("PMR_WORKFLOW_SHA", "")
-    verify_source(values["action-ref"], workflow_sha)
+    verify_source(values["action-ref"])
     api = GitHub(values["repository"] or os.environ["GITHUB_REPOSITORY"])
     if api.repository != os.environ["GITHUB_REPOSITORY"]:
         raise EvaluationError("repository must match the workflow context")
@@ -181,9 +196,13 @@ def run_action() -> int:
     config, config_sha = trusted_config(
         api, values["config-path"], values["config-sha"], values["action-ref"]
     )
-    source = provenance(
-        api.repository, values["action-ref"], config_sha, values["config-path"], workflow_sha
-    )
+    if operation == "prepare":
+        return prepare(config, config_sha)
+    if operation == "validate-config":
+        output({"config-sha": config_sha})
+        print(json.dumps({"valid": True, "config_sha": config_sha}))
+        return 0
+    source = provenance(api.repository, values["action-ref"], config_sha, values["config-path"])
     policy = policy_from(config)
     event = (
         {}

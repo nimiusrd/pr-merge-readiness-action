@@ -1,6 +1,6 @@
-# v0.2.0。workflow の uses / action-ref にも同じ SHA を指定します。
+# 公開済み release の SHA に置換し、workflow の uses / action-ref にも指定します。
 version = 1
-action_ref = "68a4aa9a0b4778452fc7f74d77c48d508d62bfe2"
+action_ref = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 [ci]
 workflows = ["CI"]

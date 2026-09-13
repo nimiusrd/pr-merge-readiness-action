@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from pr_merge_readiness import runtime
 from pr_merge_readiness.artifacts import provenance, write_json
-from pr_merge_readiness.config import ACTION_REPOSITORY, WORKFLOW_PATH
+from pr_merge_readiness.config import ACTION_REPOSITORY
 from pr_merge_readiness.observe import observe
 from pr_merge_readiness.publish import PublishError
 from tests.test_collect import FixtureAPI
@@ -95,25 +95,21 @@ def test_default_branch_resolved_once_and_pinned_for_later_jobs():
         runtime.trusted_config(api, ".github/config.toml", BASE, action_ref)
 
 
-def test_source_and_reusable_workflow_must_match():
+def test_source_must_match_the_pinned_action():
     env = {
         "PMR_SOURCE_REF": HEAD,
         "PMR_SOURCE_REPOSITORY": ACTION_REPOSITORY,
-        "PMR_WORKFLOW_REPOSITORY": ACTION_REPOSITORY,
-        "PMR_WORKFLOW_PATH": WORKFLOW_PATH,
     }
     with patch.dict(os.environ, env, clear=True):
-        runtime.verify_source(HEAD, HEAD)
+        runtime.verify_source(HEAD)
         for key, wrong in (
             ("PMR_SOURCE_REF", "main"),
             ("PMR_SOURCE_REPOSITORY", "other/action"),
-            ("PMR_WORKFLOW_PATH", ".github/workflows/other.yml"),
-            ("PMR_WORKFLOW_REPOSITORY", "other/action"),
         ):
             with patch.dict(os.environ, {key: wrong}), pytest.raises(ValueError):
-                runtime.verify_source(HEAD, HEAD)
+                runtime.verify_source(HEAD)
         with pytest.raises(ValueError):
-            runtime.verify_source(HEAD, BASE)
+            runtime.verify_source(BASE)
     with (
         patch.dict(os.environ, {}, clear=True),
         patch("pr_merge_readiness.runtime.subprocess.run") as git,
@@ -127,6 +123,16 @@ def test_source_and_reusable_workflow_must_match():
     "operation,extra",
     (
         ("unknown", {}),
+        ("prepare", {"PMR_CONFIG_SHA": BASE}),
+        ("prepare", {"PMR_PR_NUMBER": "1"}),
+        ("prepare", {"PMR_EVENT_PATH": "event.json"}),
+        ("prepare", {"PMR_REPORT_DIR": "reports"}),
+        ("prepare", {"PMR_ARTIFACT_NAME": "artifact"}),
+        ("validate-config", {}),
+        ("validate-config", {"PMR_CONFIG_SHA": BASE, "PMR_PR_NUMBER": "1"}),
+        ("validate-config", {"PMR_CONFIG_SHA": BASE, "PMR_EVENT_PATH": "event.json"}),
+        ("validate-config", {"PMR_CONFIG_SHA": BASE, "PMR_REPORT_DIR": "reports"}),
+        ("validate-config", {"PMR_CONFIG_SHA": BASE, "PMR_ARTIFACT_NAME": "artifact"}),
         ("mark", {"PMR_PR_NUMBER": "1"}),
         ("mark", {"PMR_REPORT_DIR": "report"}),
         ("mark", {"PMR_ARTIFACT_NAME": "x"}),
