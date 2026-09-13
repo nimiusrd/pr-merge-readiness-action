@@ -2,7 +2,7 @@
 
 GitHub の PR・レビュー・CI・変更履歴を読み取り、マージ準備状況を判定する Composite Action です。任意のリポジトリの workflow から `uses:` で呼び出し、PR ごとの JSON と Job Summary を生成できます。参考 Check と手動ラベルの公開にも対応しています。
 
-対応環境は GitHub.com、Ubuntu、Python 3.14、Git です。Python は uv 0.12.13 で管理し、Action・CI・Dev Container・共通 workflow で同じ minor を使用します。実行時の Python 依存パッケージはありません。
+対応環境は GitHub.com、Ubuntu、Python 3.14、Git です。Python は uv 0.12.13 で管理し、Action・CI・Dev Container で同じ minor を使用します。実行時の Python 依存パッケージはありません。
 
 ## クイックスタート
 
@@ -29,10 +29,10 @@ jobs:
       checks: read
       statuses: read
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@68a4aa9a0b4778452fc7f74d77c48d508d62bfe2 # v0.2.0
+      - uses: nimiusrd/pr-merge-readiness-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # 公開済み release SHA に置換
         with:
           operation: observe
-          action-ref: 68a4aa9a0b4778452fc7f74d77c48d508d62bfe2
+          action-ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           pr-number: ${{ inputs.pr-number }}
           report-dir: readiness-report
           artifact-name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
@@ -45,7 +45,7 @@ jobs:
           retention-days: 30
 ```
 
-`uses:`、入力 `action-ref`、設定 `action_ref` には、同じ release の **40 桁 commit SHA** を指定します。上の例と最小設定は [v0.2.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.2.0) に固定しています。更新時は 3 箇所を合わせて変更してください。
+`uses:`、入力 `action-ref`、設定 `action_ref` には、同じ release の **40 桁 commit SHA** を指定します。例の `aaaa...` は、[公開済み release](https://github.com/nimiusrd/pr-merge-readiness-action/releases) の SHA に置き換えてください。更新時は 3 箇所を合わせて変更してください。
 
 Action が Python と自身の実装を用意し、呼び出したリポジトリの設定と PR を GitHub API から読み取ります。利用側に Python の導入、Action ソースのコピー、checkout step は必要ありません。設定は default branch から読み、その commit SHA を出力します。
 
@@ -53,19 +53,21 @@ Action が Python と自身の実装を用意し、呼び出したリポジト�
 
 ## Check・ラベルを公開する
 
-`operation` ごとに step を組み合わせて利用できます。[観測 → Check 公開の完全な workflow 例](.github/workflows/standalone.yml)では、read-only の観測 job と `checks: write` の公開 job を分けています。上の workflow の代わりにコピーし、同じ設定で実行できます。この例では `publication.checks = true` を使用してください。
+`operation` ごとに step を組み合わせて利用します。[通常の workflow の完全な例](examples/pr-merge-readiness.yml)をコピーすると、CI・PR イベント、未観測表示、観測、Check、手動ラベル、設定検証を導入できます。再利用可能 workflow と workflow 生成 CLI は提供しません。
 
-公開 job には観測時の `config-sha` 出力と、同じ run ID・attempt の artifact を渡します。公開直前にも head/base・状態を確認し、遅延結果で新しい表示を戻しません。Check を更新する全 job の concurrency group は `autonomous-merge-check-writer` に統一してください。
+`prepare` が default branch の設定 SHA を一度確定し、イベントと設定から後続処理を選択します。観測と公開には同じ `config-sha` 出力を渡してください。公開には同じ run ID・attempt の artifact を渡します。公開直前にも head/base・状態を確認し、遅延結果で新しい表示を戻しません。
 
-`publish-labels` は `workflow_dispatch` の `update-labels = true` と全 open PR の観測を要求します。PR 番号指定とは併用できません。Check が有効なら観測 → Check → ラベルの順序で job を構成し、Check 公開失敗後はラベルを更新しないでください。ラベル更新全体の concurrency group は `autonomous-merge-labels` です。
+観測は read-only、Check とラベルは別 job の限定権限で実行します。Check を更新する全 job の concurrency group は `autonomous-merge-check-writer` に統一してください。手動ラベル更新の全体は `autonomous-merge-labels` で直列化します。
 
-CI・PR イベントへの追従、設定の検証、権限分離、Check・ラベルの公開順序をまとめて導入するには、任意で[共通 workflow と生成 CLI](docs/reusable-workflow.md)を利用できます。
+`publish-labels` は `workflow_dispatch` の `update-labels = true` と全 open PR の観測を要求します。PR 番号指定とは併用できません。Check が有効なら観測 → Check → ラベルの順序で job を構成し、Check 公開失敗後はラベルを更新しないでください。完全な例にはこの条件を含めています。
+
+[workflow の設定・更新手順](docs/workflow.md)に、イベント対応表と設定検証の方法を記載しています。
 
 ## 設定 version 1
 
 ```toml
 version = 1
-action_ref = "68a4aa9a0b4778452fc7f74d77c48d508d62bfe2" # v0.2.0
+action_ref = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" # 公開済み release SHA に置換
 
 [ci]
 workflows = ["CI"]
@@ -105,10 +107,10 @@ app_id = 15368
 
 | 入力 | 契約 |
 | --- | --- |
-| `operation` | 必須。`observe`／`mark`／`publish-checks`／`publish-labels` |
+| `operation` | 必須。`prepare`／`validate-config`／`observe`／`mark`／`publish-checks`／`publish-labels` |
 | `action-ref` | 必須。Action 自身の 40 桁 SHA |
 | `config-path` | default branch の設定パス。既定 `.github/pr-merge-readiness.toml` |
-| `config-sha` | 固定した設定 commit。公開では必須。省略時は default branch を解決 |
+| `config-sha` | 公開・`validate-config` では必須、`prepare` では禁止。観測・`mark` には準備の出力を渡す。省略時は default branch を解決 |
 | `repository` | workflow の repository と一致すること。既定 `github.repository` |
 | `pr-number` | 手動 `observe` だけで使う任意の正整数 |
 | `event-path` | `observe`／`mark` 用。省略時 `GITHUB_EVENT_PATH` |
@@ -116,12 +118,15 @@ app_id = 15368
 | `artifact-name` | 観測・公開で必須。`pr-merge-readiness-RUN_ID-ATTEMPT`。`mark` では禁止 |
 | `token` | 必須の権限を持つ token。既定 `github.token` |
 
-`publish-*` は `pr-number` と `event-path` を受け取りません。`publish-labels` は実イベントの明示的な手動入力と、全 open PR 観測を要求します。出力は `report-dir`、`manifest`、`artifact-name`、`config-sha`。`mark` の出力は設定 SHA だけです。複数 PR の判定を boolean に集約しません。
+`prepare` と `validate-config` は `pr-number`・`event-path`・`report-dir`・`artifact-name` を受け取りません。`prepare` は実イベントの `pr-number` と `update-labels` を検証し、`operation`（`mark`／`observe`／`skip`）、`checks`、`labels`、`pr-number`、`config-sha` を出力します。`checks` と `labels` は `"true"`／`"false"` の文字列です。`validate-config` は明示した commit の TOML を read-only で検証し、設定 SHA だけを出力します。運用用の設定確定には使いません。
 
-`observe` は `workflow_dispatch`、対象 `workflow_run` の完了、`pull_request_target` の終了で使用します。`mark` は対象 CI の開始または PR の状態変更用です。直接利用する場合もこのイベント契約に従って step を振り分けてください。[イベント対応表](docs/reusable-workflow.md#イベント)を参照できます。
+`publish-*` は `pr-number` と `event-path` を受け取りません。`publish-labels` は実イベントの明示的な手動入力と、全 open PR 観測を要求します。観測・公開の出力は `report-dir`、`manifest`、`artifact-name`、`config-sha`。`mark` の出力は設定 SHA だけです。複数 PR の判定を boolean に集約しません。
+
+`observe` は `workflow_dispatch`、対象 `workflow_run` の完了、`pull_request_target` の終了で使用します。`mark` は対象 CI の開始または PR の状態変更用です。直接利用する場合もこのイベント契約に従って step を振り分けてください。[イベント対応表](docs/workflow.md#イベント)を参照できます。
 
 | operation | job の token 権限 |
 | --- | --- |
+| `prepare`・`validate-config` | `contents: read` |
 | `observe` | `contents: read`、`pull-requests: read`、`checks: read`、`statuses: read` |
 | `mark` | `contents: read`、`pull-requests: read`、`checks: write`、`actions: read` |
 | `publish-checks` | `contents: read`、`pull-requests: read`、`checks: write` |
@@ -135,7 +140,7 @@ artifact 名は run ID と attempt ごとに分け、保持期間を 30 日に�
 
 同じ run の全 job 再実行では、前 attempt の artifact が取得できなくなる場合があります。[upload-artifact #585](https://github.com/actions/upload-artifact/issues/585) に、名前を attempt ごとに分けた場合も含む報告があります。再観測には新しい **Run workflow** を使い、再実行する場合は必要な artifact を先に Git 外へ保存してください。30日の保存設定は、GitHub 上で削除・再実行された artifact の再取得を保証しません。
 
-レポートは `format = "pr-merge-readiness/report"`、manifest は `format = "pr-merge-readiness/manifest"`、いずれも `schema_version = 1` です。レポートには観測、正規化 policy、policy の SHA-256 指紋、判定、conditions、出所を保存します。出所は評価器・設定・共通 workflow の repository／SHA／path。共通 workflow を使わない実行の workflow 出所は null です。manifest は repository、run ID、attempt、artifact 名、観測範囲、PR 別ファイル一覧、収集失敗状態、同じ出所を持ちます。公開前に一覧の全ファイルを検証します。
+レポートは `format = "pr-merge-readiness/report"`、manifest は `format = "pr-merge-readiness/manifest"`、いずれも `schema_version = 1` です。レポートには観測、正規化 policy、policy の SHA-256 指紋、判定、conditions、出所を保存します。出所は評価器・設定の repository／SHA／path です。`provenance.workflow` は常に null です。manifest は repository、run ID、attempt、artifact 名、観測範囲、PR 別ファイル一覧、収集失敗状態、同じ出所を持ちます。公開前に一覧の全ファイルを検証します。
 
 新しい artifact を展開し、その Action SHA を含む、利用者が信頼したローカル Git リポジトリを指定します。
 
@@ -165,7 +170,7 @@ devcontainer exec --workspace-folder . uv run --locked python scripts/check_work
 
 `.python-version` で Python 3.14、`uv.lock` で開発依存関係を固定します。依存更新時は `uv lock --upgrade` で lockfile を更新し、上記検証を実行してください。テストは pytest の関数・fixture・パラメータ化で記述し、Ruff で lint と整形、mypy の strict mode でパッケージ・CLI・検証スクリプトを型検査します。
 
-このリポジトリでも[直接利用の workflow](.github/workflows/standalone.yml)を実行できます。Run workflow で `config-path = examples/minimal.toml` とこのリポジトリの PR 番号を指定します。実測記録には run URL、attempt、対象 SHA、Action SHA、設定 SHA、JSON 名、期待値・実測値を残し、生 JSON は artifact または Git 外に保存します。
+実測記録には run URL、attempt、対象 SHA、Action SHA、設定 SHA、JSON 名、期待値・実測値を残し、生 JSON は artifact または Git 外に保存します。
 
 不具合や改善提案は[このリポジトリの Issues](https://github.com/nimiusrd/pr-merge-readiness-action/issues)で管理します。
 

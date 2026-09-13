@@ -45,9 +45,7 @@ def test_explicit_commit_survives_poisoned_checkout_pythonpath_and_future_clock(
         trusted = git("rev-parse", "HEAD")
         report = {
             **assess(facts(), policy()),
-            "provenance": provenance(
-                "example/project", trusted, BASE, ".github/config.toml", trusted
-            ),
+            "provenance": provenance("example/project", trusted, BASE, ".github/config.toml"),
         }
         (package / "evaluate.py").write_text('raise RuntimeError("untrusted checkout")\n')
         (root / "json.py").write_text('raise RuntimeError("consumer module")\n')
@@ -102,7 +100,7 @@ def test_cli_does_not_import_consumer_modules_or_project_environment(tmp_path, l
         else ["bash", str(ROOT / "run.sh")]
     )
     result = subprocess.run(
-        [*command, "generate-workflow", "--config", "config.toml", "--output", "generated.yml"],
+        [*command, "validate-config", "--config", "config.toml"],
         cwd=tmp_path,
         env={
             **os.environ,
@@ -119,4 +117,4 @@ def test_cli_does_not_import_consumer_modules_or_project_environment(tmp_path, l
     )
     assert not (tmp_path / "executed").exists()
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "jobs:" in (tmp_path / "generated.yml").read_text()
+    assert json.loads(result.stdout) == {"valid": True}

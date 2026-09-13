@@ -1,4 +1,4 @@
-"""Action、workflow 準備、設定生成、再評価のコマンド。"""
+"""Action、ローカル設定検証、再評価のコマンド。"""
 
 import argparse
 import json
@@ -8,24 +8,16 @@ import tarfile
 from pathlib import Path
 
 from .config import load_config
-from .generate import generate_workflow
 from .replay import replay
-from .runtime import prepare, run_action, save_failure
+from .runtime import run_action, save_failure
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("action")
-    generate = commands.add_parser("generate-workflow")
-    generate.add_argument("--config", type=Path, required=True)
-    generate.add_argument("--output", type=Path, required=True)
-    generate.add_argument("--check", action="store_true")
-    preparing = commands.add_parser("prepare")
-    preparing.add_argument("--config-path", required=True)
-    preparing.add_argument("--action-ref", required=True)
-    preparing.add_argument("--pr-number", default="")
-    preparing.add_argument("--update-labels", choices=("true", "false"), default="false")
+    validation = commands.add_parser("validate-config")
+    validation.add_argument("--config", type=Path, required=True)
     replaying = commands.add_parser("replay")
     replaying.add_argument("--report", type=Path, required=True)
     replaying.add_argument("--source-dir", type=Path, required=True)
@@ -35,12 +27,10 @@ def main() -> int:
     try:
         if args.command == "action":
             return run_action()
-        if args.command == "prepare":
-            return prepare(
-                args.config_path, args.action_ref, args.pr_number, args.update_labels == "true"
-            )
-        if args.command == "generate-workflow":
-            return generate_workflow(load_config(args.config), args.config, args.output, args.check)
+        if args.command == "validate-config":
+            load_config(args.config)
+            print(json.dumps({"valid": True}))
+            return 0
         report = json.loads(args.report.read_text())
         result = replay(report, args.source_dir, args.source_repository, args.action_sha)
         same = result == report
@@ -63,7 +53,7 @@ def main() -> int:
         tarfile.TarError,
     ) as error:
         print(json.dumps({"error": str(error)}))
-        if args.command == "prepare":
+        if args.command == "action" and os.environ.get("PMR_OPERATION") == "prepare":
             save_failure(Path("preparation-report"), error)
         elif args.command == "action" and os.environ.get("PMR_OPERATION") == "observe":
             save_failure(Path(os.environ.get("PMR_REPORT_DIR") or "readiness-report"), error)

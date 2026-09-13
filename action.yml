@@ -3,7 +3,7 @@ description: Observe PR metadata and publish reference Checks or manually reques
 author: nimiusrd
 inputs:
   operation:
-    description: observe, mark, publish-checks, or publish-labels
+    description: prepare, validate-config, observe, mark, publish-checks, or publish-labels
     required: true
   action-ref:
     description: Full 40-character source commit SHA
@@ -12,7 +12,7 @@ inputs:
     description: Configuration path on the trusted default branch
     default: .github/pr-merge-readiness.toml
   config-sha:
-    description: Pinned configuration commit; required for publication
+    description: Configuration commit; required for validate-config and publication, forbidden for prepare
   repository:
     description: Target owner/repository (must match the workflow context)
     default: ${{ github.repository }}
@@ -28,6 +28,18 @@ inputs:
     description: Token scoped to the operation
     default: ${{ github.token }}
 outputs:
+  operation:
+    description: Next operation selected by prepare (observe, mark, or skip)
+    value: ${{ steps.run.outputs.operation }}
+  checks:
+    description: Whether Check publication is enabled (prepare only)
+    value: ${{ steps.run.outputs.checks }}
+  labels:
+    description: Whether the event explicitly requests labels (prepare only)
+    value: ${{ steps.run.outputs.labels }}
+  pr-number:
+    description: Validated manual PR selection (prepare only)
+    value: ${{ steps.run.outputs.pr-number }}
   config-sha:
     description: Trusted configuration commit
     value: ${{ steps.run.outputs.config-sha }}

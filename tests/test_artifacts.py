@@ -64,6 +64,9 @@ def test_old_schema_and_tampered_policy_are_rejected():
             lambda r: r.update(schema_version=True),
             lambda r: r["policy"].update(stale_change_review_days=7),
             lambda r: r["provenance"]["evaluator"].update(repository="other/repo"),
+            lambda r: r["provenance"].update(
+                workflow={"repository": "other/repo", "sha": BASE, "path": "workflow.yml"}
+            ),
         ):
             changed = deepcopy(report)
             mutate(changed)

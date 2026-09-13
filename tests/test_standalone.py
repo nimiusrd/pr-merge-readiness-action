@@ -72,16 +72,31 @@ def test_direct_action_observes_and_publishes_in_callers_repository(
         "PMR_SOURCE_REPOSITORY": ACTION_REPOSITORY,
         "PMR_ACTION_REF": source_ref,
         "PMR_CONFIG_PATH": "settings/readiness.toml",
-        "PMR_OPERATION": "observe",
-        "PMR_PR_NUMBER": "1",
-        "PMR_REPORT_DIR": "reports",
-        "PMR_ARTIFACT_NAME": "pr-merge-readiness-42-2",
+        "PMR_OPERATION": "prepare",
     }
     with (
         patch.dict(os.environ, environment, clear=True),
         patch.object(runtime, "GitHub", return_value=reader) as reader_factory,
         patch.object(runtime.publish, "GitHub", return_value=writer) as writer_factory,
     ):
+        assert runtime.run_action() == 0
+        prepared = dict(
+            line.split("=", 1) for line in (tmp_path / "outputs").read_text().splitlines()
+        )
+        assert prepared == {
+            "operation": "observe",
+            "config-sha": BASE,
+            "pr-number": "1",
+            "checks": "true",
+            "labels": "false",
+        }
+        os.environ.update(
+            PMR_OPERATION=prepared["operation"],
+            PMR_CONFIG_SHA=prepared["config-sha"],
+            PMR_PR_NUMBER=prepared["pr-number"],
+            PMR_REPORT_DIR="reports",
+            PMR_ARTIFACT_NAME="pr-merge-readiness-42-2",
+        )
         assert runtime.run_action() == 0
         report = json.loads((tmp_path / "reports/pr-1.json").read_text())
         manifest = json.loads((tmp_path / "reports/manifest.json").read_text())
@@ -118,6 +133,7 @@ def test_direct_action_observes_and_publishes_in_callers_repository(
     assert config_requests == [
         reader.prefix,
         reader.prefix + "/git/ref/heads/trunk",
+        reader.prefix + f"/contents/settings/readiness.toml?ref={BASE}",
         reader.prefix + f"/contents/settings/readiness.toml?ref={BASE}",
         reader.prefix + f"/contents/settings/readiness.toml?ref={BASE}",
     ]
