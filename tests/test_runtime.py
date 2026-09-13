@@ -67,14 +67,15 @@ def test_routes_and_manual_input_conflicts():
 
 
 def test_default_branch_resolved_once_and_pinned_for_later_jobs():
-    text = (ROOT / "examples/devops-tycoon.toml").read_bytes()
+    text = (ROOT / "examples/minimal.toml").read_bytes()
+    action_ref = config()["action_ref"]
     api = Mock(prefix="/repos/example/project")
     api.request.side_effect = [
         {"default_branch": "main"},
         {"object": {"sha": BASE}},
         {"type": "file", "encoding": "base64", "content": base64.b64encode(text).decode()},
     ]
-    value, pinned = runtime.trusted_config(api, ".github/config.toml", "", HEAD)
+    value, pinned = runtime.trusted_config(api, ".github/config.toml", "", action_ref)
     assert pinned == BASE
     assert api.request.call_count == 3
     api.reset_mock(side_effect=True)
@@ -83,7 +84,7 @@ def test_default_branch_resolved_once_and_pinned_for_later_jobs():
         "encoding": "base64",
         "content": base64.b64encode(text).decode(),
     }
-    assert runtime.trusted_config(api, ".github/config.toml", pinned, HEAD) == (value, BASE)
+    assert runtime.trusted_config(api, ".github/config.toml", pinned, action_ref) == (value, BASE)
     api.request.assert_called_once_with(
         f"/repos/example/project/contents/.github/config.toml?ref={BASE}"
     )
@@ -91,7 +92,7 @@ def test_default_branch_resolved_once_and_pinned_for_later_jobs():
         runtime.trusted_config(api, ".github/config.toml", BASE, "c" * 40)
     api.request.side_effect = ValueError("HTTP 403")
     with pytest.raises(ValueError, match="403"):
-        runtime.trusted_config(api, ".github/config.toml", BASE, HEAD)
+        runtime.trusted_config(api, ".github/config.toml", BASE, action_ref)
 
 
 def test_source_and_reusable_workflow_must_match():

@@ -1,0 +1,72 @@
+name: PR Merge Readiness (standalone)
+
+# 任意の利用側リポジトリへコピーできる、Composite Action の直接利用例。
+on:
+  workflow_dispatch:
+    inputs:
+      config-path:
+        description: Default branch の設定ファイル
+        type: string
+        default: .github/pr-merge-readiness.toml
+      pr-number:
+        description: PR 番号（空欄なら全 open PR）
+        type: string
+        default: ''
+
+permissions: {}
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      statuses: read
+    outputs:
+      config-sha: ${{ steps.observe.outputs.config-sha }}
+    steps:
+      - id: observe
+        uses: nimiusrd/pr-merge-readiness-action@68a4aa9a0b4778452fc7f74d77c48d508d62bfe2 # v0.2.0
+        with:
+          operation: observe
+          action-ref: 68a4aa9a0b4778452fc7f74d77c48d508d62bfe2
+          config-path: ${{ inputs.config-path }}
+          pr-number: ${{ inputs.pr-number }}
+          report-dir: readiness-report
+          artifact-name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Save this attempt's observations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: readiness-report/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-checks:
+    needs: observe
+    if: ${{ !cancelled() && needs.observe.outputs.config-sha != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: autonomous-merge-check-writer
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: readiness-report
+      - uses: nimiusrd/pr-merge-readiness-action@68a4aa9a0b4778452fc7f74d77c48d508d62bfe2 # v0.2.0
+        with:
+          operation: publish-checks
+          action-ref: 68a4aa9a0b4778452fc7f74d77c48d508d62bfe2
+          config-path: ${{ inputs.config-path }}
+          config-sha: ${{ needs.observe.outputs.config-sha }}
+          report-dir: readiness-report
+          artifact-name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}

@@ -10,7 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from pr_merge_readiness.config import CALLER_PATH, CONFIG_PATH, load_config
+from pr_merge_readiness.config import ACTION_REPOSITORY, CALLER_PATH, CONFIG_PATH, load_config
 from pr_merge_readiness.generate import render
 
 
@@ -28,6 +28,11 @@ def main() -> None:
     assert project["tool"]["mypy"]["strict"] is True
     assert project["tool"]["ruff"]["target-version"] == "py314"
     steps = list(action["runs"]["steps"])
+    # README のコピー用 YAML も実ファイルと同じ固定参照検証に含める。
+    snippets = re.findall(r"```yaml\n(.*?)\n```", (ROOT / "README.md").read_text(), re.DOTALL)
+    assert len(snippets) == 1
+    quickstart = yaml.load(snippets[0], Loader=yaml.BaseLoader)
+    steps.extend(quickstart["jobs"]["observe"]["steps"])
     for path in (ROOT / ".github/workflows").glob("*.yml"):
         workflow = load(path)
         assert "on" in workflow and "jobs" in workflow
@@ -45,6 +50,29 @@ def main() -> None:
             assert step["with"]["python-version"] == "3.14"
             assert "==" + step["with"]["version"] == project["tool"]["uv"]["required-version"]
     assert uv_setups == 4  # Composite、CI、準備、提案設定の検証
+    minimal = load_config(ROOT / "examples/minimal.toml")
+    standalone = load(ROOT / ".github/workflows/standalone.yml")
+    for workflow in (quickstart, standalone):
+        assert set(workflow["on"]) == {"workflow_dispatch"}
+        observer = workflow["jobs"]["observe"]
+        assert all(value == "read" for value in observer["permissions"].values())
+        for job in workflow["jobs"].values():
+            assert "uses" not in job  # 再利用 workflow は不要。
+            for step in job["steps"]:
+                uses = step.get("uses", "")
+                assert not uses.startswith(("actions/checkout@", "./"))
+                if uses.startswith(ACTION_REPOSITORY + "@"):
+                    assert uses == ACTION_REPOSITORY + "@" + minimal["action_ref"]
+                    assert step["with"]["action-ref"] == minimal["action_ref"]
+                if "upload-artifact@" in uses:
+                    assert step["if"] == "always()"
+                    assert step["with"]["retention-days"] == "30"
+                    assert step["with"]["if-no-files-found"] == "error"
+    publisher = standalone["jobs"]["publish-checks"]
+    assert publisher["needs"] == "observe"
+    assert publisher["permissions"]["checks"] == "write"
+    assert publisher["concurrency"]["group"] == "autonomous-merge-check-writer"
+    assert publisher["steps"][-1]["with"]["config-sha"] == "${{ needs.observe.outputs.config-sha }}"
     ci = load(ROOT / ".github/workflows/ci.yml")
     commands = {step.get("run") for step in ci["jobs"]["test"]["steps"]}
     assert {
