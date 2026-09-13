@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.ruff_cache/
+.venv/
+.tmp/
+*.egg-info/
+build/
+dist/
+/readiness-report/
+/preparation-report/
+/evidence/
+/reports/
+/.devcontainer.bak-*/
