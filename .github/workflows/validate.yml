@@ -1,0 +1,43 @@
+name: Validate Readiness Configuration
+on:
+  workflow_call:
+    inputs:
+      config-path:
+        type: string
+        required: true
+      output-path:
+        type: string
+        required: true
+      action-ref:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .readiness-action
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: proposed
+          persist-credentials: false
+      - name: Validate proposed data without executing repository code
+        working-directory: proposed
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+          OUTPUT_PATH: ${{ inputs.output-path }}
+          ACTION_REF: ${{ inputs.action-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          test "$ACTION_REF" = "$WORKFLOW_SHA"
+          python3 -I -B ../.readiness-action/cli.py generate-workflow --config "$CONFIG_PATH" --output "$OUTPUT_PATH" --check

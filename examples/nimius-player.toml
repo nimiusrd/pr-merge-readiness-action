@@ -1,0 +1,50 @@
+# action_ref は利用する release の実 SHA に置き換えてください。
+version = 1
+action_ref = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[ci]
+workflows = ["frontend", "tauri-rust", "css"]
+
+[review]
+minimum_approvals = 0
+require_resolved_threads = true
+stale_change_review_days = 30
+
+[publication]
+checks = true
+labels = "manual"
+
+[[ci.required_checks]]
+kind = "check_run"
+name = "Lint & format"
+app_id = 15368
+
+[[ci.required_checks]]
+kind = "check_run"
+name = "Unit tests (coverage)"
+app_id = 15368
+
+[[ci.required_checks]]
+kind = "check_run"
+name = "npm audit"
+app_id = 15368
+
+[[ci.required_checks]]
+kind = "check_run"
+name = "E2E (Playwright)"
+app_id = 15368
+
+[[ci.required_checks]]
+kind = "check_run"
+name = "Windows compile check"
+app_id = 15368
+
+[[ci.required_checks]]
+kind = "check_run"
+name = "tauri-rust"
+app_id = 15368
+
+[[ci.required_checks]]
+kind = "check_run"
+name = "css"
+app_id = 15368

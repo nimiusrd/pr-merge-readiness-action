@@ -1,0 +1,32 @@
+{
+  "name": "pr-merge-readiness-action",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11-bookworm",
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.fixAll": "explicit",
+          "source.organizeImports": "explicit"
+        },
+        "files.eol": "\n",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        },
+        "python.analysis.typeCheckingMode": "basic",
+        "ruff.lint.run": "onSave",
+        "ruff.format.preview": true
+      }
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "postCreateCommand": "python -m pip install -r requirements-dev.txt"
+}

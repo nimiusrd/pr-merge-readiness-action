@@ -1,0 +1,62 @@
+name: PR Merge Readiness
+description: Observe PR metadata and publish reference Checks or manually requested labels.
+author: nimiusrd
+inputs:
+  operation:
+    description: observe, mark, publish-checks, or publish-labels
+    required: true
+  action-ref:
+    description: Full 40-character source commit SHA
+    required: true
+  config-path:
+    description: Configuration path on the trusted default branch
+    default: .github/pr-merge-readiness.toml
+  config-sha:
+    description: Pinned configuration commit; required for publication
+  repository:
+    description: Target owner/repository (must match the workflow context)
+    default: ${{ github.repository }}
+  pr-number:
+    description: Optional PR number for manual observation only
+  event-path:
+    description: Event JSON for observe or mark (defaults to GITHUB_EVENT_PATH)
+  report-dir:
+    description: Report directory for observe and publication
+  artifact-name:
+    description: pr-merge-readiness-RUN_ID-RUN_ATTEMPT
+  token:
+    description: Token scoped to the operation
+    default: ${{ github.token }}
+outputs:
+  config-sha:
+    description: Trusted configuration commit
+    value: ${{ steps.run.outputs.config-sha }}
+  report-dir:
+    description: Absolute report directory
+    value: ${{ steps.run.outputs.report-dir }}
+  manifest:
+    description: Manifest path
+    value: ${{ steps.run.outputs.manifest }}
+  artifact-name:
+    description: Artifact name for this run and attempt
+    value: ${{ steps.run.outputs.artifact-name }}
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        PMR_ROOT: ${{ github.action_path }}
+        PMR_SOURCE_REF: ${{ github.action_ref }}
+        PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
+        PMR_OPERATION: ${{ inputs.operation }}
+        PMR_ACTION_REF: ${{ inputs.action-ref }}
+        PMR_CONFIG_PATH: ${{ inputs.config-path }}
+        PMR_CONFIG_SHA: ${{ inputs.config-sha }}
+        PMR_REPOSITORY: ${{ inputs.repository }}
+        PMR_PR_NUMBER: ${{ inputs.pr-number }}
+        PMR_EVENT_PATH: ${{ inputs.event-path }}
+        PMR_REPORT_DIR: ${{ inputs.report-dir }}
+        PMR_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: python3 -I -B "$PMR_ROOT/cli.py" action
