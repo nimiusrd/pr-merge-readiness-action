@@ -10,9 +10,9 @@ import pytest
 from pr_merge_readiness import runtime
 from pr_merge_readiness.config import ACTION_REPOSITORY
 from tests.test_collect import FixtureAPI as Reader
-from tests.test_config import ROOT, config
+from tests.test_config import config, config_text
 from tests.test_publish_checks import FixtureAPI as Writer
-from tests.test_support import BASE, HEAD
+from tests.test_support import BASE
 
 
 @pytest.mark.parametrize("repository", ("sample-org/service", "another-owner/library"))
@@ -27,7 +27,7 @@ def test_direct_action_observes_and_publishes_in_callers_repository(
         api.prefix = "/repos/" + repository
     writer.prs[1]["base"]["ref"] = reader.state["baseRefName"]
     writer.prs[1]["updated_at"] = reader.state["updatedAt"]
-    settings = (ROOT / "examples/minimal.toml").read_bytes()
+    settings = config_text().encode()
     source_ref = config()["action_ref"]
     config_requests = []
     request, pages = reader.request, reader.pages
@@ -50,9 +50,6 @@ def test_direct_action_observes_and_publishes_in_callers_repository(
 
     def read_pages(path, key=None):
         records = pages(path, key)
-        if path.startswith(f"/commits/{HEAD}/check-runs"):
-            for record in records:
-                record.update(name="test", app={"id": 15368})
         return records
 
     monkeypatch.setattr(reader, "request", read)

@@ -7,6 +7,7 @@ from urllib.error import HTTPError
 from urllib.parse import unquote
 from pr_merge_readiness.publish import (
     DECISION_LABELS,
+    LABEL_COLORS,
     LABEL_DESCRIPTIONS,
     MANAGED_LABELS,
     GitHub,
@@ -26,6 +27,7 @@ UNKNOWN = DECISION_LABELS["INSUFFICIENT_DATA"]
 def report(decision="WAITING", number=1):
     return {
         "decision": decision,
+        "label_assessment": {"decision": decision, "conditions": []},
         "observations": {
             "repository": "example/project",
             "pr": {
@@ -57,6 +59,14 @@ class FixtureAPI:
     def __init__(self, labels=()):
         self.pulls = {1: pull(labels)}
         self.definitions = set(MANAGED_LABELS)
+        self.definition_metadata = {
+            name: {
+                "name": name,
+                "color": LABEL_COLORS[name],
+                "description": LABEL_DESCRIPTIONS[name],
+            }
+            for name in DECISION_LABELS.values()
+        }
         self.calls = []
         self.fail = None
         self.closed = []
@@ -75,10 +85,14 @@ class FixtureAPI:
         if route[1] == "labels":
             if verb == "POST":
                 self.definitions.add(body["name"])
+                self.definition_metadata[body["name"]] = copy.deepcopy(body)
                 return body
-            if "/".join(route[2:]) not in self.definitions:
+            name = "/".join(route[2:])
+            if name not in self.definitions:
                 raise PublishError("HTTP 404")
-            return {}
+            if verb == "PATCH":
+                self.definition_metadata[name].update(copy.deepcopy(body))
+            return copy.deepcopy(self.definition_metadata[name])
         if route[1] == "issues":
             number = int(route[2])
             labels = self.pulls[number]["labels"]
@@ -116,11 +130,9 @@ def test_all_decisions_replace_only_managed_labels_and_are_idempotent():
         "head_sha": "d" * 40,
         "base_sha": "d" * 40,
         "base_ref": "release",
-        "state": "CLOSED",
-        "draft": True,
     }.items(),
 )
-def test_pr_changes_are_marked_for_reobservation(key, value):
+def test_review_target_changes_are_marked_for_reobservation(key, value):
     api = FixtureAPI([READY])
     data = report("SHADOW_CONDITIONS_MET")
     data["observations"]["pr"][key] = value
@@ -194,7 +206,7 @@ def test_definitions_created_once_then_reused():
     api = FixtureAPI()
     api.definitions.clear()
     ensure_labels(api)
-    assert api.definitions == MANAGED_LABELS
+    assert api.definitions == set(DECISION_LABELS.values())
     ensure_labels(api)
     assert sum((verb == "POST" for verb, _, _ in api.calls)) == 4
 
@@ -229,3 +241,53 @@ def test_closed_listing_reads_all_pages_and_rejects_truncation():
     ):
         with pytest.raises(PublishError, match="pagination limit"):
             api.pages("/issues?state=closed")
+
+
+def test_manual_sync_removes_retired_ci_labels_without_recreating_them():
+    api = FixtureAPI(["shadow/CI・レビュー待ち", "shadow/要マージ判断", "bug"])
+    api.definitions.clear()
+    ensure_labels(api)
+    publish_pr(api, 1, report("SHADOW_CONDITIONS_MET"))
+    assert api.names() == ["bug", "shadow/レビュー条件充足"]
+    assert api.definitions == set(DECISION_LABELS.values())
+
+
+def test_existing_label_descriptions_are_updated_once():
+    api = FixtureAPI()
+    name = DECISION_LABELS["HUMAN_REVIEW_REQUIRED"]
+    api.definition_metadata[name]["description"] = "競合・CI失敗などに対応が必要"
+    ensure_labels(api)
+    assert api.definition_metadata[name]["description"] == LABEL_DESCRIPTIONS[name]
+    ensure_labels(api)
+    assert sum(verb == "PATCH" for verb, _, _ in api.calls) == 1
+
+
+def test_server_normalized_color_does_not_cause_repeated_updates():
+    api = FixtureAPI()
+    for definition in api.definition_metadata.values():
+        definition["color"] = definition["color"].lower()
+    ensure_labels(api)
+    assert all(verb == "GET" for verb, _, _ in api.calls)
+
+
+@pytest.mark.parametrize("decision", ["WAITING", "HUMAN_REVIEW_REQUIRED", "INSUFFICIENT_DATA"])
+def test_labels_use_review_assessment_even_when_reference_assessment_differs(decision):
+    api = FixtureAPI([UNKNOWN])
+    api.pulls[1]["draft"] = True
+    data = report("SHADOW_CONDITIONS_MET")
+    data["decision"] = decision
+    # 観測後のDraft・open/closed状態の変更は、レビュー対象が同じならラベルに影響しない。
+    data["observations"]["pr"].update(state="CLOSED", draft=False)
+    publish_pr(api, 1, data)
+    assert api.names() == [READY]
+
+
+@pytest.mark.parametrize("assessment", [None, {}, {"decision": []}, {"decision": "INVALID"}])
+def test_invalid_label_assessment_never_falls_back_to_overall_decision(assessment):
+    api = FixtureAPI([WAITING])
+    data = report("SHADOW_CONDITIONS_MET")
+    data["label_assessment"] = assessment
+    with pytest.raises(PublishError):
+        publish_pr(api, 1, data)
+    assert all(verb == "GET" for verb, _, _ in api.calls)
+    assert api.names() == [WAITING]

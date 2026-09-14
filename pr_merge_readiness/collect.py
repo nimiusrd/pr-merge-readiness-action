@@ -16,7 +16,6 @@ from urllib.request import Request, urlopen
 
 from .contracts import (
     ChangedFile,
-    Check,
     ChangeHistory,
     DecisionMetadata,
     FileHistory,
@@ -35,9 +34,8 @@ MAX_HISTORY_FILES = 100
 MAX_HISTORY_REQUESTS = 100
 PR_FIELDS = """
 number state isDraft headRefOid baseRefOid baseRefName updatedAt
-mergeable mergeStateStatus reviewDecision
+mergeable reviewDecision
 additions deletions changedFiles
-potentialMergeCommit { oid }
 """
 
 
@@ -143,7 +141,6 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
 
 
 def normalized_pr(raw: dict[str, Any]) -> PullRequest:
-    merge = raw["potentialMergeCommit"]
     return {
         "number": raw["number"],
         "state": raw["state"],
@@ -152,9 +149,7 @@ def normalized_pr(raw: dict[str, Any]) -> PullRequest:
         "base_sha": sha(raw["baseRefOid"]),
         "base_ref": raw["baseRefName"],
         "updated_at": raw["updatedAt"],
-        "merge_sha": sha(merge["oid"]) if merge else None,
         "mergeable": raw["mergeable"],
-        "merge_state": raw["mergeStateStatus"],
         "review_decision": raw["reviewDecision"],
         "additions": raw["additions"],
         "deletions": raw["deletions"],
@@ -165,10 +160,9 @@ def normalized_pr(raw: dict[str, Any]) -> PullRequest:
 def decision_metadata(
     api: GitHub,
     number: int,
-    pr: PullRequest,
 ) -> DecisionMetadata:
-    """判定に使うCI・レビュー状態を同じ方法で再取得できるようにする。"""
-    metadata: DecisionMetadata = {"reviews": [], "checks": [], "unresolved_threads": 0}
+    """判定に使うレビュー状態を同じ方法で再取得できるようにする。"""
+    metadata: DecisionMetadata = {"reviews": [], "unresolved_threads": 0}
     reviews = api.pages(f"/pulls/{number}/reviews")
     metadata["reviews"] = [
         {
@@ -186,40 +180,7 @@ def decision_metadata(
     if any(type(t["isResolved"]) is not bool for t in threads):
         raise CollectionError("invalid review thread state")
     metadata["unresolved_threads"] = sum(not t["isResolved"] for t in threads)
-    metadata["checks"] = []
-    for commit in dict.fromkeys([pr["head_sha"], pr["merge_sha"]]):
-        if commit is None:
-            continue
-        runs = api.pages(f"/commits/{commit}/check-runs?filter=all", "check_runs")
-        for run in runs:
-            # APIを要求したSHAとcheck自体のSHAの双方を保存・照合する。
-            if run["head_sha"] != commit:
-                raise CollectionError("check run SHA mismatch")
-            metadata["checks"].append(
-                {
-                    "kind": "check_run",
-                    "name": run["name"],
-                    "app_id": run["app"]["id"],
-                    "id": run["id"],
-                    "sha": commit,
-                    "status": run["status"],
-                    "conclusion": run["conclusion"],
-                }
-            )
-        for status in api.pages(f"/commits/{commit}/statuses"):
-            metadata["checks"].append(
-                {
-                    "kind": "status",
-                    "name": status["context"],
-                    "creator": status["creator"]["login"],
-                    "id": status["id"],
-                    "sha": commit,
-                    "status": "pending" if status["state"] == "pending" else "completed",
-                    "conclusion": status["state"],
-                }
-            )
-    for records in (metadata["reviews"], metadata["checks"]):
-        records.sort(key=lambda item: json.dumps(item, sort_keys=True))
+    metadata["reviews"].sort(key=lambda item: json.dumps(item, sort_keys=True))
     return metadata
 
 
@@ -251,8 +212,8 @@ def observation_changes(before: dict[str, Any], after: dict[str, Any]) -> list[O
         {"count": before["unresolved_threads"]},
         {"count": after["unresolved_threads"]},
     )
-    for group in ("reviews", "checks"):
-        keys = ("id",) if group == "reviews" else ("kind", "sha", "id")
+    for group in ("reviews",):
+        keys = ("id",)
         old = {tuple(r[k] for k in keys): r for r in before[group]}
         new = {tuple(r[k] for k in keys): r for r in after[group]}
         for key in sorted(old.keys() | new.keys()):
@@ -268,14 +229,8 @@ def observation_changes(before: dict[str, Any], after: dict[str, Any]) -> list[O
                     }
                 )
             else:
-                # 名前とproducerも、差分の識別に必要な既存メタデータだけを使う。
-                identity.update(
-                    {
-                        k: old[key][k]
-                        for k in ("name", "app_id", "creator", "author")
-                        if k in old[key]
-                    }
-                )
+                # 本文を含めず、差分の識別に必要な作者だけを使う。
+                identity.update({k: old[key][k] for k in ("author",) if k in old[key]})
                 compare(group, old[key], new[key], identity)
     return changes
 
@@ -337,11 +292,12 @@ def collect(
     history_collector: ChangeHistoryCollector | None = None,
 ) -> Observations:
     facts: Observations = {
-        "schema_version": 1,
+        "schema_version": 2,
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "repository": api.repository,
         "collection_errors": [],
         "stable": False,
+        "review_stable": False,
         "observation_changes": None,
     }
     try:
@@ -396,52 +352,41 @@ def collect(
         initial_metadata = decision_metadata(
             api,
             number,
-            before,
         )
         facts["reviews"] = initial_metadata["reviews"]
-        facts["checks"] = initial_metadata["checks"]
         facts["unresolved_threads"] = initial_metadata["unresolved_threads"]
         collector = (
             history_collector if history_collector is not None else ChangeHistoryCollector(api)
         )
         facts["change_history"] = collector.collect(before["base_sha"], files)
-        histories: dict[tuple[str, str, str, int | str], list[Check]] = {}
-        for check in facts["checks"]:
-            key = (
-                check["sha"],
-                check["kind"],
-                check["name"],
-                check["app_id"] if check["kind"] == "check_run" else check["creator"],
-            )
-            histories.setdefault(key, []).append(check)
-        facts["ci_history"] = [
-            {
-                "sha": key[0],
-                "kind": key[1],
-                "name": key[2],
-                "producer": key[3],
-                "records": len(checks),
-                "failure_before_success": any(
-                    c["conclusion"] in {"failure", "error", "timed_out"} for c in checks
-                )
-                and max(checks, key=lambda c: c["id"])["conclusion"] == "success",
-            }
-            for key, checks in histories.items()
-        ]
         confirmed_metadata = decision_metadata(
             api,
             number,
-            before,
         )
         after = normalized_pr(api.graphql(number, PR_FIELDS))
         facts["rechecked"] = {
             "pr": before == after,
             "reviews": initial_metadata["reviews"] == confirmed_metadata["reviews"],
-            "checks": initial_metadata["checks"] == confirmed_metadata["checks"],
             "unresolved_threads": initial_metadata["unresolved_threads"]
             == confirmed_metadata["unresolved_threads"],
         }
         facts["stable"] = all(facts["rechecked"].values())
+        # PRの表示状態と更新時刻はラベルに使わない。レビュー対象と内容の一致は必要。
+        review_pr_fields = (
+            "number",
+            "head_sha",
+            "base_sha",
+            "base_ref",
+            "review_decision",
+            "additions",
+            "deletions",
+            "changed_files",
+        )
+        facts["review_stable"] = (
+            all(before.get(key) == after.get(key) for key in review_pr_fields)
+            and facts["rechecked"]["reviews"]
+            and facts["rechecked"]["unresolved_threads"]
+        )
         facts["observation_changes"] = observation_changes(
             {"pr": before, **initial_metadata},
             {"pr": after, **confirmed_metadata},
@@ -459,6 +404,5 @@ def targets(api: GitHub, event: dict[str, Any], requested: int | None) -> list[i
         return [requested]
     if "pull_request" in event:
         return [event["pull_request"]["number"]]
-    # CI完了時も全open PRを再評価する。base更新・fork・同じheadを持つ複数PRに対応。
-    # 古いworkflow_run payloadのSHAを、現在のPRのSHAとして使わない。
+    # 番号未指定の手動観測では、現在の全open PRを対象にする。
     return [p["number"] for p in api.pages("/pulls?state=open")]

@@ -10,7 +10,7 @@ import pytest
 from pr_merge_readiness import runtime
 from pr_merge_readiness.cli import main
 from pr_merge_readiness.config import ACTION_REPOSITORY
-from tests.test_config import ROOT, config
+from tests.test_config import config, config_text
 from tests.test_support import BASE
 
 
@@ -39,7 +39,7 @@ def context(tmp_path, monkeypatch):
         "PMR_CONFIG_PATH": ".github/config.toml",
     }
     api = Mock(repository="sample-org/project", prefix="/repos/sample-org/project")
-    text = (ROOT / "examples/minimal.toml").read_text()
+    text = config_text()
     with patch.dict(os.environ, env, clear=True), patch.object(runtime, "GitHub", return_value=api):
         yield api, text, event, tmp_path / "outputs"
 
@@ -50,8 +50,8 @@ def context(tmp_path, monkeypatch):
         ("workflow_dispatch", {"inputs": {"pr-number": "12"}}, True, ("observe", "12", "false")),
         ("workflow_dispatch", {"inputs": {"update-labels": "true"}}, True, ("observe", "", "true")),
         ("workflow_dispatch", {"inputs": {"update-labels": True}}, False, ("observe", "", "true")),
-        ("pull_request_target", {"action": "opened"}, True, ("mark", "", "false")),
-        ("pull_request_target", {"action": "opened"}, False, ("skip", "", "false")),
+        ("pull_request_target", {"action": "opened"}, True, ("observe", "", "false")),
+        ("pull_request_target", {"action": "opened"}, False, ("observe", "", "false")),
         (
             "pull_request_target",
             {"action": "edited", "changes": {"title": {}}},
@@ -62,7 +62,7 @@ def context(tmp_path, monkeypatch):
             "workflow_run",
             {"action": "completed", "workflow_run": {"name": "CI"}},
             True,
-            ("observe", "", "false"),
+            ("skip", "", "false"),
         ),
     ],
 )

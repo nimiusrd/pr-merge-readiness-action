@@ -56,8 +56,7 @@ def main() -> int:
         operation = os.environ.get("PMR_OPERATION") or "run"
         preparing = operation == "prepare" or (
             operation == "run"
-            and os.environ.get("GITHUB_EVENT_NAME")
-            in {"workflow_dispatch", "workflow_run", "pull_request_target"}
+            and os.environ.get("GITHUB_EVENT_NAME") in {"workflow_dispatch", "pull_request_target"}
         )
         if args.command == "action" and preparing:
             save_failure(Path("preparation-report"), error)

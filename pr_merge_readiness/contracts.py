@@ -10,21 +10,6 @@ Decision = Literal["SHADOW_CONDITIONS_MET", "WAITING", "HUMAN_REVIEW_REQUIRED", 
 ConditionStatus = Literal["pass", "waiting", "blocked", "unknown"]
 
 
-class RequiredCheckRun(TypedDict):
-    kind: Literal["check_run"]
-    name: str
-    app_id: int
-
-
-class RequiredStatus(TypedDict):
-    kind: Literal["status"]
-    name: str
-    creator: str
-
-
-RequiredCheck = RequiredCheckRun | RequiredStatus
-
-
 class ReviewConfig(TypedDict):
     minimum_approvals: int
     require_resolved_threads: bool
@@ -32,12 +17,7 @@ class ReviewConfig(TypedDict):
 
 
 class Policy(ReviewConfig):
-    required_checks: list[RequiredCheck]
-
-
-class CIConfig(TypedDict):
-    workflows: list[str]
-    required_checks: list[RequiredCheck]
+    pass
 
 
 class PublicationConfig(TypedDict):
@@ -46,9 +26,8 @@ class PublicationConfig(TypedDict):
 
 
 class Config(TypedDict):
-    version: Literal[1]
+    version: Literal[2]
     action_ref: str
-    ci: CIConfig
     review: ReviewConfig
     publication: PublicationConfig
 
@@ -71,32 +50,13 @@ class PullRequest(TypedDict):
     draft: bool
     head_sha: str
     base_sha: str
-    merge_sha: str | None
     mergeable: Literal["MERGEABLE", "CONFLICTING", "UNKNOWN"]
-    merge_state: str
     review_decision: str | None
     base_ref: NotRequired[str]
     updated_at: NotRequired[str]
     additions: NotRequired[int]
     deletions: NotRequired[int]
     changed_files: NotRequired[int]
-
-
-class CheckRun(RequiredCheckRun):
-    id: int
-    sha: str
-    status: str
-    conclusion: str | None
-
-
-class CommitStatus(RequiredStatus):
-    id: int
-    sha: str
-    status: str
-    conclusion: str | None
-
-
-Check = CheckRun | CommitStatus
 
 
 class Review(TypedDict):
@@ -138,15 +98,6 @@ class ChangeHistory(TypedDict):
     files: list[FileHistory]
 
 
-class CIHistory(TypedDict):
-    sha: str
-    kind: str
-    name: str
-    producer: int | str
-    records: int
-    failure_before_success: bool
-
-
 class ObservationChange(TypedDict):
     group: str
     identity: dict[str, Any] | None
@@ -158,24 +109,22 @@ class ObservationChange(TypedDict):
 class DecisionMetadata(TypedDict):
     reviews: list[Review]
     unresolved_threads: int
-    checks: list[Check]
 
 
 class Observations(TypedDict):
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     observed_at: str
     repository: str
     collection_errors: list[str]
     stable: bool
+    review_stable: bool
     pr: NotRequired[PullRequest]
     change: NotRequired[ChangeSize]
     files: NotRequired[list[ChangedFile]]
     change_history: NotRequired[ChangeHistory]
     reviews: NotRequired[list[Review]]
     unresolved_threads: NotRequired[int]
-    checks: NotRequired[list[Check]]
     ci_definition_changes: NotRequired[list[str]]
-    ci_history: NotRequired[list[CIHistory]]
     rechecked: NotRequired[dict[str, bool]]
     observation_changes: NotRequired[list[ObservationChange] | None]
 
@@ -183,18 +132,22 @@ class Observations(TypedDict):
 class Condition(TypedDict):
     name: str
     status: ConditionStatus
-    # CI記録・件数・理由文など条件ごとに異なる。保存時にJSONへ変換する。
+    # レビュー・件数・理由文など条件ごとに異なる。保存時にJSONへ変換する。
     detail: Any
 
 
-class Assessment(TypedDict):
+class ConditionAssessment(TypedDict):
+    decision: Decision
+    conditions: list[Condition]
+
+
+class Assessment(ConditionAssessment):
     format: Literal["pr-merge-readiness/report"]
     # 純粋な評価の後、保存前に信頼済みソース情報を付与する。
     provenance: NotRequired[Provenance]
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     mode: Literal["shadow"]
-    decision: Decision
-    conditions: list[Condition]
+    label_assessment: ConditionAssessment
     observations: Observations
     policy: Policy
     policy_sha256: str

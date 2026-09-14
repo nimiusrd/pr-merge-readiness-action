@@ -132,7 +132,7 @@ def write_check(
 
 def heading(current: dict[str, Any], run_url: str) -> str:
     return (
-        "観測時点の参考表示です。自動マージ許可・必須CIではありません。\n\n"
+        "PR・レビュー・変更履歴の参考表示です。CI の結果は GitHub Checks で確認してください。自動マージ許可ではありません。\n\n"
         f"PR: #{current['number']} / 表示対象head: {code(current['head_sha'])}\n\n"
         f"現在のbase: {code(current['base_ref'])} {code(current['base_sha'])}\n\n"
         f"[このrun・attemptのSummaryとArtifacts]({run_url})\n\n"
@@ -181,62 +181,3 @@ def publish_report(
         summary = summary.encode()[:58000].decode("utf-8", errors="ignore")
         summary += "\n\n条件詳細は上記artifactを参照してください。\n"
     return write_check(api, current, at, title, summary, run_url)
-
-
-def mark_event(api: GitHub, event: dict[str, Any], run_url: str) -> list[dict[str, Any]]:
-    candidates = []
-    if "pull_request" in event:
-        payload = event["pull_request"]
-        # タイトル・本文だけの編集では失効させない。base編集はchangesで識別する。
-        if event.get("action") == "edited" and "base" not in event.get("changes", {}):
-            return []
-        candidates = [payload]
-        at = payload["updated_at"]
-        expected = snapshot(payload)
-        run = None
-    elif "workflow_run" in event:
-        payload = event["workflow_run"]
-        # 特定のイベント元runだけを再取得。再実行の古いattemptや完了済み通知は無視。
-        run = api.request(f"{api.prefix}/actions/runs/{positive(payload['id'])}")
-        if run["status"] != "in_progress" or run["run_attempt"] != payload["run_attempt"]:
-            return []
-        at = run["run_started_at"]
-        candidates = api.pages("/pulls?state=open")
-        expected = None
-    else:
-        raise PublishError("unsupported marker event")
-    timestamp(at)
-    results = []
-    for candidate in candidates:
-        number = positive(candidate["number"])
-        pr = api.request(f"{api.prefix}/pulls/{number}")
-        current = snapshot(pr)
-        if current["state"] != "OPEN":
-            continue
-        if expected and any(current[k] != expected[k] for k in current if k != "updated_at"):
-            continue
-        if run and run["head_sha"] not in {
-            current["head_sha"],
-            pr.get("merge_commit_sha"),
-            current["base_sha"] if run["event"] == "push" else None,
-        }:
-            continue
-        summary = heading(current, run_url) + (
-            f"未観測イベント時刻: {code(at)}\n\n"
-            "この表示では収集・評価を実行していません。CI完了後の観測、"
-            "または手動観測を待ってください。観測JSONはまだありません。\n"
-        )
-        results.append(
-            {
-                "pr": number,
-                "result": write_check(
-                    api,
-                    current,
-                    at,
-                    "未観測：CI完了・再観測待ち",
-                    summary,
-                    run_url,
-                ),
-            }
-        )
-    return results

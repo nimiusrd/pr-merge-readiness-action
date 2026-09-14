@@ -12,7 +12,7 @@ from pr_merge_readiness.artifacts import provenance
 from pr_merge_readiness.config import ACTION_REPOSITORY
 from pr_merge_readiness.evaluate import assess
 from pr_merge_readiness.replay import replay
-from tests.test_config import ROOT
+from tests.test_config import ROOT, config_text
 from tests.test_support import BASE, facts, policy
 
 
@@ -74,11 +74,13 @@ def test_explicit_commit_survives_poisoned_checkout_pythonpath_and_future_clock(
         for repository, commit in (("other/action", trusted), (ACTION_REPOSITORY, BASE)):
             with pytest.raises(ValueError):
                 replay(report, root, repository, commit)
-        report["decision"] = "WAITING"
-        report_path.write_text(json.dumps(report))
-        process = subprocess.run(command, cwd=root, env=env, capture_output=True, text=True)
-        assert process.returncode == 1, process.stdout + process.stderr
-        assert not json.loads(process.stdout)["matches"]
+        for assessment in (report, report["label_assessment"]):
+            assessment["decision"] = "WAITING"
+            report_path.write_text(json.dumps(report))
+            process = subprocess.run(command, cwd=root, env=env, capture_output=True, text=True)
+            assert process.returncode == 1, process.stdout + process.stderr
+            assert not json.loads(process.stdout)["matches"]
+            assessment["decision"] = "SHADOW_CONDITIONS_MET"
 
 
 @pytest.mark.parametrize("launcher", ["python", "uv"])
@@ -93,7 +95,7 @@ def test_cli_does_not_import_consumer_modules_or_project_environment(tmp_path, l
     poison = virtualenv / "bin/python"
     poison.write_text('#!/bin/sh\ntouch "' + str(tmp_path / "executed") + '"\nexit 99\n')
     poison.chmod(0o755)
-    shutil.copyfile(ROOT / "examples/minimal.toml", tmp_path / "config.toml")
+    (tmp_path / "config.toml").write_text(config_text())
     command = (
         [sys.executable, "-I", "-B", str(ROOT / "cli.py")]
         if launcher == "python"

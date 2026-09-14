@@ -1,7 +1,7 @@
 """設定の欠落・型不正・不正な固定参照は成功扱いしない。"""
 
 import pytest
-import copy
+import tomllib
 import tempfile
 from pathlib import Path
 from pr_merge_readiness.config import load_config, policy_from, relative_path, validate_config
@@ -10,16 +10,26 @@ from pr_merge_readiness.contracts import EvaluationError
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def config_text(name="minimal"):
+    return (
+        (ROOT / "examples" / f"{name}.toml")
+        .read_text()
+        .replace("REPLACE_WITH_RELEASE_COMMIT_SHA", "21fa2df95fc615847ba7e1a24e9c77bd5d1323fb")
+    )
+
+
 def config():
-    return load_config(ROOT / "examples/minimal.toml")
+    return validate_config(tomllib.loads(config_text()))
 
 
-@pytest.mark.parametrize("name,count", (("minimal", 1), ("multiple-workflows", 7)))
-def test_examples_have_exact_workflow_and_check_identities(name, count):
-    value = load_config(ROOT / "examples" / f"{name}.toml")
-    assert len(value["ci"]["required_checks"]) == count
-    assert {c["app_id"] for c in value["ci"]["required_checks"]} == {15368}
-    assert policy_from(value)["stale_change_review_days"] == 30
+@pytest.mark.parametrize("name,approvals,days", (("minimal", 0, 30), ("review-policy", 1, 14)))
+def test_examples_define_review_policy_without_ci(name, approvals, days):
+    value = validate_config(tomllib.loads(config_text(name)))
+    assert policy_from(value) == {
+        "minimum_approvals": approvals,
+        "require_resolved_threads": True,
+        "stale_change_review_days": days,
+    }
     assert "version" not in policy_from(value)
     assert "action_ref" not in policy_from(value)
 
@@ -38,10 +48,7 @@ def test_required_fields_unknown_keys_and_invalid_types():
     for section, key in (
         (None, "version"),
         (None, "action_ref"),
-        (None, "ci"),
         (None, "review"),
-        ("ci", "workflows"),
-        ("ci", "required_checks"),
         ("review", "minimum_approvals"),
         ("review", "require_resolved_threads"),
         ("review", "stale_change_review_days"),
@@ -50,14 +57,14 @@ def test_required_fields_unknown_keys_and_invalid_types():
         del (value[section] if section else value)[key]
         with pytest.raises(ValueError):
             validate_config(value)
-    for section in (None, "ci", "review", "publication"):
+    for section in (None, "review", "publication"):
         value = config()
         (value[section] if section else value)["typo"] = True
         with pytest.raises(ValueError):
             validate_config(value)
     mutations = [
         ("version", True),
-        ("version", 2),
+        ("version", 1),
         ("action_ref", "main"),
         ("action_ref", "a" * 39),
         ("ci", []),
@@ -77,15 +84,10 @@ def test_threshold_is_a_positive_integer(invalid):
         validate_config(value)
 
 
-def test_duplicate_workflows_checks_and_missing_producers():
+def test_ci_settings_and_invalid_publication_are_rejected():
     for mutate in (
-        lambda v: v["ci"].update(workflows=[]),
-        lambda v: v["ci"].update(workflows=["CI", "CI"]),
-        lambda v: v["ci"].update(workflows=[" CI"]),
-        lambda v: v["ci"].update(required_checks=[]),
-        lambda v: v["ci"]["required_checks"].append(copy.deepcopy(v["ci"]["required_checks"][0])),
-        lambda v: v["ci"]["required_checks"][0].pop("app_id"),
-        lambda v: v["ci"]["required_checks"][0].update(app_id=True),
+        lambda v: v.update(ci={"workflows": ["CI"], "required_checks": []}),
+        lambda v: v["review"].update(required_checks=[]),
         lambda v: v["publication"].update(labels="auto"),
         lambda v: v["publication"].update(checks="false"),
     ):
@@ -93,9 +95,6 @@ def test_duplicate_workflows_checks_and_missing_producers():
         mutate(value)
         with pytest.raises((ValueError, TypeError)):
             validate_config(value)
-    value = config()
-    value["ci"]["required_checks"] = [{"kind": "status", "name": "ci", "creator": "builder"}]
-    assert validate_config(value)["ci"]["required_checks"][0]["creator"] == "builder"
 
 
 def test_toml_duplicate_key_is_rejected():

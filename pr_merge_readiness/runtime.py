@@ -94,11 +94,6 @@ def route(
         raise EvaluationError("labels require all open PRs and publication.labels=manual")
     if event_name == "workflow_dispatch":
         return "observe"
-    if event_name == "workflow_run":
-        run = event["workflow_run"]
-        if run["name"] not in config["ci"]["workflows"]:
-            return "skip"
-        return {"in_progress": "mark", "completed": "observe"}.get(event.get("action", ""), "skip")
     if event_name == "pull_request_target":
         action = event.get("action")
         if action == "closed":
@@ -113,7 +108,7 @@ def route(
             "ready_for_review",
             "converted_to_draft",
         }:
-            return "mark"
+            return "observe"
     return "skip"
 
 
@@ -132,8 +127,6 @@ def prepare(config: Config, config_sha: str, *, automatic: bool = False) -> int:
         raise EvaluationError("invalid manual inputs")
     update_labels = labels in ("true", True)
     operation = route(os.environ["GITHUB_EVENT_NAME"], event, config, pr_number, update_labels)
-    if operation == "mark" and not config["publication"]["checks"]:
-        operation = "skip"
     values = {
         "config-sha": config_sha,
         "operation": operation,
@@ -186,7 +179,7 @@ def run_action() -> int:
         elif event_name == "push":
             values["config-sha"] = os.environ["GITHUB_SHA"]
             operation = "validate-config"
-        elif event_name in {"workflow_dispatch", "workflow_run", "pull_request_target"}:
+        elif event_name in {"workflow_dispatch", "pull_request_target"}:
             operation = "prepare"
         else:
             operation = "skip"
@@ -196,7 +189,6 @@ def run_action() -> int:
         "prepare",
         "validate-config",
         "observe",
-        "mark",
         "publish-checks",
         "publish-labels",
     }:
@@ -209,14 +201,10 @@ def run_action() -> int:
             raise EvaluationError("prepare resolves the default branch once")
         if operation == "validate-config" and not values["config-sha"]:
             raise EvaluationError("validate-config requires an explicit proposal config-sha")
-    if (publishing and (values["pr-number"] or values["event-path"])) or (
-        operation == "mark" and values["pr-number"]
-    ):
+    if publishing and (values["pr-number"] or values["event-path"]):
         raise EvaluationError("irrelevant PR/event input")
     if publishing and not values["config-sha"]:
         raise EvaluationError("publication requires the observation config-sha")
-    if operation == "mark" and (values["report-dir"] or values["artifact-name"]):
-        raise EvaluationError("mark does not use reports or artifacts")
     verify_source(values["action-ref"])
     if automatic and operation == "skip":
         output({"operation": "skip"})
@@ -246,15 +234,6 @@ def run_action() -> int:
     )
     run_id, attempt = os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"]
     run_url = f"https://github.com/{api.repository}/actions/runs/{positive(run_id)}/attempts/{positive(attempt)}"
-    if operation == "mark":
-        if not config["publication"]["checks"]:
-            raise EvaluationError("Check publication is disabled")
-        if route(os.environ["GITHUB_EVENT_NAME"], event, config, "", False) != "mark":
-            raise EvaluationError("event does not request a marker")
-        results = publish_checks.mark_event(publish.GitHub(api.repository), event, run_url)
-        print(json.dumps(results, ensure_ascii=False))
-        output({"config-sha": config_sha})
-        return 0
     name = artifact_name(run_id, attempt)
     if values["artifact-name"] != name or not values["report-dir"]:
         raise EvaluationError("this run/attempt artifact-name and report-dir are required")

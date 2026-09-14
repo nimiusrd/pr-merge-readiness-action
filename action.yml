@@ -3,7 +3,7 @@ description: Observe PR metadata and publish reference Checks or manually reques
 author: nimiusrd
 inputs:
   operation:
-    description: run (automatic flow), prepare, validate-config, observe, mark, publish-checks, or publish-labels
+    description: run (automatic flow), prepare, validate-config, observe, publish-checks, or publish-labels
     default: run
   action-ref:
     description: Full source commit SHA; defaults to the actual pinned Action reference
@@ -18,7 +18,7 @@ inputs:
   pr-number:
     description: Optional PR number for manual observation only
   event-path:
-    description: Event JSON for observe or mark (defaults to GITHUB_EVENT_PATH)
+    description: Event JSON for observe (defaults to GITHUB_EVENT_PATH)
   report-dir:
     description: Report directory for observe and publication
   artifact-name:
@@ -28,7 +28,7 @@ inputs:
     default: ${{ github.token }}
 outputs:
   operation:
-    description: Operation selected by run or prepare (validate-config, observe, mark, or skip)
+    description: Operation selected by run or prepare (validate-config, observe or skip)
     value: ${{ steps.run.outputs.operation }}
   checks:
     description: Whether Check publication is enabled (run or prepare)
@@ -81,7 +81,7 @@ runs:
 
     - id: preparation
       name: Save preparation failure
-      if: ${{ failure() && inputs.operation == 'run' && steps.run.outcome == 'failure' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_run' || github.event_name == 'pull_request_target') }}
+      if: ${{ failure() && inputs.operation == 'run' && steps.run.outcome == 'failure' && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target') }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: pr-merge-readiness-preparation-${{ github.run_id }}-${{ github.run_attempt }}
@@ -89,8 +89,8 @@ runs:
         if-no-files-found: error
         retention-days: 30
     - id: execute
-      name: Observe or mark
-      if: inputs.operation == 'run' && (steps.run.outputs.operation == 'observe' || steps.run.outputs.operation == 'mark')
+      name: Observe
+      if: inputs.operation == 'run' && steps.run.outputs.operation == 'observe'
       shell: bash
       env:
         PMR_ROOT: ${{ github.action_path }}

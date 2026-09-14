@@ -76,25 +76,8 @@ class FixtureAPI:
                     "submitted_at": "2026-09-11T12:00:00Z",
                 }
             ]
-        if path.startswith(f"/commits/{HEAD}/check-runs"):
-            return [
-                {
-                    "id": 1,
-                    "name": "Test",
-                    "app": {"id": 1},
-                    "head_sha": HEAD,
-                    "status": "completed",
-                    "conclusion": "failure",
-                },
-                {
-                    "id": 2,
-                    "name": "Test",
-                    "app": {"id": 1},
-                    "head_sha": HEAD,
-                    "status": "completed",
-                    "conclusion": "success",
-                },
-            ]
+        if "/check-runs" in path or "/statuses" in path:
+            raise AssertionError("CI state must not be collected")
         return []
 
 
@@ -116,7 +99,7 @@ class FixtureAPI:
         },
     ],
 )
-def test_workflow_changes_cannot_be_masked_by_same_name_success(change):
+def test_workflow_definition_changes_require_review(change):
     api = FixtureAPI()
     api.files[0].update(change)
     result = collect(api, 1)
@@ -137,67 +120,6 @@ def test_rename_requires_previous_path_and_preserves_ordinary_changes():
     assert assess(collect(api, 1), policy())["decision"] == "INSUFFICIENT_DATA"
 
 
-@pytest.mark.parametrize("add_run", [True, False])
-def test_rerun_detected_without_any_pr_state_change(add_run):
-    api = FixtureAPI()
-    original = api.pages
-
-    def changing(path, key=None):
-        records = original(path, key)
-        if path.startswith(f"/commits/{HEAD}/check-runs") and api.paths.count(path) == 2:
-            if add_run:
-                records.append(
-                    {**records[-1], "id": 3, "status": "in_progress", "conclusion": None}
-                )
-            else:
-                records[-1].update(status="in_progress", conclusion=None)
-        return records
-
-    api.pages = changing
-    result = collect(api, 1)
-    assert result["rechecked"]["pr"]
-    assert not result["rechecked"]["checks"]
-    changes = result["observation_changes"]
-    summary = markdown(assess(result, policy()))
-    assert "identity" in summary
-    assert "check_run" in summary
-    assert "in_progress" in summary
-    if add_run:
-        assert changes[0]["field"] == "record"
-        assert changes[0]["before"] is None
-        assert changes[0]["after"]["id"] == 3
-    else:
-        assert {c["field"] for c in changes} == {"status", "conclusion"}
-        assert changes[0]["identity"]["name"] == "Test"
-    assert assess(result, policy())["decision"] == "INSUFFICIENT_DATA"
-
-
-@pytest.mark.parametrize("fail", [False, True])
-def test_legacy_status_change_and_recheck_error_are_not_success(fail):
-    api = FixtureAPI()
-    original = api.pages
-
-    def changing(path, key=None):
-        records = original(path, key)
-        if path == f"/commits/{HEAD}/statuses" and api.paths.count(path) == 2:
-            if fail:
-                raise CollectionError("API 403 during recheck")
-            return [
-                {"id": 4, "context": "External CI", "creator": {"login": "ci"}, "state": "pending"}
-            ]
-        return records
-
-    api.pages = changing
-    facts = collect(api, 1)
-    assert assess(facts, policy())["decision"] == "INSUFFICIENT_DATA"
-    if fail:
-        assert facts["observation_changes"] is None
-    else:
-        change = facts["observation_changes"][0]
-        assert change["identity"]["kind"] == "status"
-        assert change["after"]["name"] == "External CI"
-
-
 def test_reviews_and_thread_resolution_are_also_rechecked():
     api = FixtureAPI()
     original = api.pages
@@ -211,6 +133,7 @@ def test_reviews_and_thread_resolution_are_also_rechecked():
     api.pages = changing_reviews
     facts = collect(api, 1)
     assert assess(facts, policy())["decision"] == "INSUFFICIENT_DATA"
+    assert assess(facts, policy())["label_assessment"]["decision"] == "INSUFFICIENT_DATA"
     assert facts["observation_changes"][0] == {
         "group": "reviews",
         "identity": {"id": 1, "author": "reviewer"},
@@ -234,6 +157,8 @@ def test_reviews_and_thread_resolution_are_also_rechecked():
     api.connection = changing_threads
     result = collect(api, 1)
     assert not result["rechecked"]["unresolved_threads"]
+    assert not result["review_stable"]
+    assert assess(result, policy())["label_assessment"]["decision"] == "INSUFFICIENT_DATA"
     assert result["observation_changes"] == [
         {"group": "unresolved_threads", "identity": None, "field": "count", "before": 0, "after": 1}
     ]
@@ -347,7 +272,6 @@ def test_collects_only_metadata_and_preserves_observations():
     assert facts["change"]["additions"] == 3
     assert facts["change"]["binary_files"] is None
     assert facts["change"]["mode_changes"] is None
-    assert facts["ci_history"][0]["failure_before_success"]
     assert assess(facts, policy())["decision"] == "SHADOW_CONDITIONS_MET"
     assert not any(("/contents/" in p or "/git/blobs/" in p for p in api.paths))
 
@@ -359,36 +283,22 @@ def test_collects_only_metadata_and_preserves_observations():
         {"baseRefOid": "d" * 40},
         {"isDraft": True},
         {"reviewDecision": "CHANGES_REQUESTED"},
-        {"potentialMergeCommit": {"oid": "d" * 40}},
         {"updatedAt": "2026-09-11T13:00:00Z"},
     ],
 )
-def test_head_base_draft_review_or_merge_changes_invalidate_collection(drift):
+def test_head_base_draft_review_or_updated_at_changes_invalidate_collection(drift):
     api = FixtureAPI()
     api.drift = drift
     assert assess(collect(api, 1), policy())["decision"] == "INSUFFICIENT_DATA"
 
 
-def test_errors_cannot_be_confused_with_no_threads_or_no_checks():
+def test_errors_cannot_be_confused_with_no_threads():
     api = FixtureAPI()
     api.failure = "API 403"
     facts = collect(api, 1)
     assert facts["collection_errors"] == ["API 403"]
     assert assess(facts, policy())["decision"] == "INSUFFICIENT_DATA"
-
-
-def test_mismatched_check_sha_is_incomplete():
-    api = FixtureAPI()
-    original = api.pages
-
-    def wrong(path, key=None):
-        result = original(path, key)
-        if "check-runs" in path and result:
-            result[0]["head_sha"] = BASE
-        return result
-
-    api.pages = wrong
-    assert "SHA mismatch" in collect(api, 1)["collection_errors"][0]
+    assert assess(facts, policy())["label_assessment"]["decision"] == "INSUFFICIENT_DATA"
 
 
 def test_rest_pages_follow_all_pages():
@@ -455,7 +365,7 @@ def test_targeting_uses_pr_number_or_current_open_prs():
     assert targets(api, {"pull_request": {"number": 9}}, None) == [9]
     assert targets(api, {}, 7) == [7]
     with patch.object(api, "pages", return_value=[{"number": 1}, {"number": 2}]):
-        assert targets(api, {"workflow_run": {"head_sha": BASE}}, None) == [1, 2]
+        assert targets(api, {}, None) == [1, 2]
     with pytest.raises(CollectionError):
         targets(api, {}, -1)
 
@@ -480,3 +390,66 @@ def test_graphql_state_query_omits_unused_cursor_variable():
         assert "$cursor" not in request.call_args.args[1]["query"]
         api.graphql(1, "reviewThreads(first: 100, after: $cursor) { nodes { isResolved } }")
         assert "$cursor: String" in request.call_args.args[1]["query"]
+
+
+@pytest.mark.parametrize("state", ["CLEAN", "BLOCKED", "UNSTABLE", "BEHIND", "UNKNOWN"])
+def test_ci_aggregate_changes_are_neither_requested_nor_recorded(state):
+    api = FixtureAPI()
+    api.drift = {"mergeStateStatus": state, "potentialMergeCommit": {"oid": "d" * 40}}
+    graphql = api.graphql
+
+    def read(number, selection):
+        assert "mergeStateStatus" not in selection
+        assert "potentialMergeCommit" not in selection
+        return graphql(number, selection)
+
+    api.graphql = read
+    result = assess(collect(api, 1), policy())
+    assert result["decision"] == "SHADOW_CONDITIONS_MET"
+    assert result["observations"]["stable"]
+    assert result["observations"]["observation_changes"] == []
+    assert not {"checks", "ci_history"} & result["observations"].keys()
+    assert not {"merge_state", "merge_sha"} & result["observations"]["pr"].keys()
+    assert not any("/check-runs" in path or "/statuses" in path for path in api.paths)
+    assert "CI履歴" not in markdown(result)
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        {"state": "CLOSED"},
+        {"isDraft": True},
+        {"mergeable": "CONFLICTING"},
+        {"mergeable": "UNKNOWN"},
+        {"updatedAt": "2026-09-11T12:01:00Z"},
+        {"isDraft": True, "updatedAt": "2026-09-11T12:01:00Z", "mergeable": "UNKNOWN"},
+    ],
+)
+def test_pr_state_drift_does_not_invalidate_review_observation(drift):
+    api = FixtureAPI()
+    api.drift = drift
+    facts = collect(api, 1)
+    assert not facts["stable"]
+    assert facts["review_stable"]
+    assert facts["observation_changes"]
+    result = assess(facts, policy())
+    assert result["decision"] == "INSUFFICIENT_DATA"
+    assert result["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        {"headRefOid": "d" * 40},
+        {"baseRefOid": "d" * 40},
+        {"baseRefName": "release"},
+        {"reviewDecision": "CHANGES_REQUESTED"},
+        {"changedFiles": 2},
+    ],
+)
+def test_review_target_drift_invalidates_label_assessment(drift):
+    api = FixtureAPI()
+    api.drift = {"isDraft": True, **drift}
+    facts = collect(api, 1)
+    assert not facts["review_stable"]
+    assert assess(facts, policy())["label_assessment"]["decision"] == "INSUFFICIENT_DATA"

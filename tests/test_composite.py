@@ -15,8 +15,9 @@ from pr_merge_readiness.cli import main
 from pr_merge_readiness.collect import CollectionError
 from pr_merge_readiness.config import ACTION_REPOSITORY
 from tests.test_collect import FixtureAPI as Reader
-from tests.test_config import ROOT, config
+from tests.test_config import ROOT, config, config_text
 from tests.test_publish import FixtureAPI as LabelWriter
+from pr_merge_readiness.publish import DECISION_LABELS
 from tests.test_publish_checks import FixtureAPI as CheckWriter
 from tests.test_support import BASE, HEAD
 
@@ -135,7 +136,7 @@ def environment(tmp_path, monkeypatch):
     reader, checks, labels = Reader(), CheckWriter(), LabelWriter()
     checks.prs[1]["base"]["ref"] = labels.pulls[1]["base"]["ref"] = reader.state["baseRefName"]
     checks.prs[1]["updated_at"] = reader.state["updatedAt"]
-    settings = {"text": (ROOT / "examples/minimal.toml").read_text(), "requests": []}
+    settings = {"text": config_text(), "requests": []}
     request, pages = reader.request, reader.pages
 
     def read(path, body=None):
@@ -157,9 +158,6 @@ def environment(tmp_path, monkeypatch):
         if path == "/pulls?state=open":
             return [{"number": 1}]
         records = pages(path, key)
-        if path.startswith(f"/commits/{HEAD}/check-runs"):
-            for record in records:
-                record.update(name="test", app={"id": 15368})
         return records
 
     monkeypatch.setattr(reader, "request", read)
@@ -268,11 +266,36 @@ def test_no_open_prs_is_success_and_saves_an_empty_manifest(environment):
     assert json.loads(action.artifacts["pr-merge-readiness-42-2"]["manifest.json"])["reports"] == []
 
 
-def test_mark_does_not_create_or_upload_observations(environment):
+@pytest.mark.parametrize(
+    "action_name",
+    ["opened", "reopened", "synchronize", "ready_for_review", "converted_to_draft", "closed"],
+)
+def test_pr_events_observe_and_publish_without_waiting_for_ci(environment, action_name):
     directory, event, _, checks, labels, _ = environment
     os.environ["GITHUB_EVENT_NAME"] = "pull_request_target"
-    event.write_text(json.dumps({"action": "opened", "pull_request": checks.prs[1]}))
+    event.write_text(json.dumps({"action": action_name, "pull_request": checks.prs[1]}))
     action = Composite(directory)
     assert action.run() == 0
-    assert action.executed == ["run", "execute"]
-    assert checks.writes and not labels.calls and not action.artifacts
+    assert action.executed == ["run", "execute", "observations", "checks"]
+    assert checks.writes and not labels.calls and action.artifacts
+    assert "SHADOW_CONDITIONS_MET" in checks.writes[0][1]["output"]["title"]
+
+
+@pytest.mark.parametrize(
+    "state,expected",
+    [({"isDraft": True}, "WAITING"), ({"mergeable": "CONFLICTING"}, "HUMAN_REVIEW_REQUIRED")],
+)
+def test_manual_labels_only_reflect_reviews_while_check_keeps_pr_state(
+    environment, state, expected
+):
+    directory, _, reader, checks, labels, _ = environment
+    reader.state.update(state)
+    checks.prs[1]["draft"] = labels.pulls[1]["draft"] = reader.state["isDraft"]
+    action = Composite(directory)
+    assert action.run() == 0
+    saved = action.artifacts["pr-merge-readiness-42-2"]
+    report = json.loads(saved["pr-1.json"])
+    assert report["decision"] == expected
+    assert report["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
+    assert expected in checks.writes[-1][1]["output"]["title"]
+    assert labels.names() == [DECISION_LABELS["SHADOW_CONDITIONS_MET"]]
