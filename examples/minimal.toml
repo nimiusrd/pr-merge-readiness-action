@@ -1,6 +1,6 @@
-# 次版の公開後、workflow の uses と同じ40桁の実装 SHA を指定します。
+# 設定 version 2 対応の実装 SHA。workflow の uses も同じ SHA に指定します。
 version = 2
-action_ref = "REPLACE_WITH_RELEASE_COMMIT_SHA"
+action_ref = "27ca8908b993e93eb319c70e7231fa7fd1999b05"
 
 [review]
 minimum_approvals = 0

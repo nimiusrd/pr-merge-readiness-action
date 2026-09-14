@@ -1,6 +1,6 @@
 # 1回の Action 呼出しで処理する
 
-[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、レビュー条件を合わせてください。次版公開後、`REPLACE_WITH_RELEASE_COMMIT_SHA` をその公開済みの40桁 SHA に置き換えて利用します。
+[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、レビュー条件を合わせてください。現在の利用例は version 2 対応の公開済み実装 `27ca8908b993e93eb319c70e7231fa7fd1999b05` に固定しています。
 
 通常の workflow から Composite Action を1回呼び出します。呼び出し側は起動条件、手動入力、runner、timeout、権限、concurrency を管理し、処理の分岐・順序・レポート保存を Action に任せます。checkout、再利用可能 workflow、生成コマンドは不要です。
 
@@ -62,12 +62,12 @@ Action 更新時は TOML の `action_ref` と workflow の `uses:` を同じ公�
 
 ## 公開後の移行
 
-次版の実装を公開するまで、このリポジトリと利用側の `.github/pr-merge-readiness.toml`・運用 workflow は公開済み v0.4.0 の SHA と設定を維持します。次版の設定を旧 SHA と組み合わせると設定検証に失敗します。
+このリポジトリの運用設定と利用例は version 2 対応の実装 `27ca8908b993e93eb319c70e7231fa7fd1999b05` を使用します。v0.4.0 から切り替える利用側は、以下の変更をまとめて反映してください。version 2 の設定を旧 Action SHA と組み合わせると設定検証に失敗します。
 
-1. 次版の公開済み40桁 SHA を確定し、`uses:` と TOML の `action_ref` に同じ値を設定します。
+1. version 2 対応の公開済み40桁 SHA を確定し、`uses:` と TOML の `action_ref` に同じ値を設定します。
 2. TOML を version 2 にし、`[ci]` と `[[ci.required_checks]]` を削除します。
 3. workflow の `workflow_run` トリガーと `actions: read`・`statuses: read` を削除します。PR 状態変更は同じ `pull_request_target` で直接観測されます。`mark` operation は廃止しています。
 4. workflow と設定を同時に反映し、Run workflow の `update-labels = true` で全 open PR を同期します。CI を含む旧ラベルの付与は open／closed PR から除去されます。他のラベルと旧ラベルのリポジトリ内の定義は削除しません。
 5. PR 更新で当該 PR が観測されること、CI 開始・完了では起動しないこと、JSON・Summary・参考 Check・ラベルに CI の実行状態が集約されないことを確認します。
 
-次版の観測・レポートは schema version 2 です。CI 状態と `mergeStateStatus` の項目を削除し、PR・レビューの鮮度を検証します。ラベル用の `label_assessment` と `review_stable` は PR の表示状態から独立させ、head・base・レビュー内容などの変化は引き続き検出します。参考 Check は引き続き常に neutral で、CI 成功やマージ許可を表しません。
+観測・レポートは schema version 2 です。CI 状態と `mergeStateStatus` の項目を削除し、PR・レビューの鮮度を検証します。ラベル用の `label_assessment` と `review_stable` は PR の表示状態から独立させ、head・base・レビュー内容などの変化は引き続き検出します。参考 Check は引き続き常に neutral で、CI 成功やマージ許可を表しません。

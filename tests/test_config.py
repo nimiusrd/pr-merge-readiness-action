@@ -11,11 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def config_text(name="minimal"):
-    return (
-        (ROOT / "examples" / f"{name}.toml")
-        .read_text()
-        .replace("REPLACE_WITH_RELEASE_COMMIT_SHA", "21fa2df95fc615847ba7e1a24e9c77bd5d1323fb")
-    )
+    return (ROOT / "examples" / f"{name}.toml").read_text()
 
 
 def config():
