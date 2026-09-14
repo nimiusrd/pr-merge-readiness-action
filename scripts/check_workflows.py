@@ -47,74 +47,26 @@ def check_action_flow(action: dict[str, Any]) -> None:
 
 
 def check_runtime(workflow: dict[str, Any], action_ref: str) -> None:
-    jobs = workflow["jobs"]
-    assert set(jobs) == {
-        "validate",
-        "prepare",
-        "mark",
-        "observe",
-        "publish-checks",
-        "publish-labels",
+    assert workflow["permissions"] == {}
+    assert "concurrency" not in workflow
+    assert set(workflow["jobs"]) == {"readiness"}
+    job = workflow["jobs"]["readiness"]
+    assert not {"if", "needs", "outputs", "uses"} & job.keys()
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["timeout-minutes"] == "45"
+    assert job["concurrency"] == {
+        "group": "autonomous-merge-check-writer",
+        "cancel-in-progress": "false",
     }
-    assert set(workflow["on"]) == {
-        "workflow_run",
-        "pull_request_target",
-        "workflow_dispatch",
-        "pull_request",
-        "push",
-    }
-    assert "autonomous-merge-labels" in workflow["concurrency"]["group"]
-    assert workflow["concurrency"]["cancel-in-progress"] == "false"
-    for name in ("validate", "prepare"):
-        assert jobs[name]["permissions"] == {"contents": "read"}
-    assert all(value == "read" for value in jobs["observe"]["permissions"].values())
-    assert jobs["mark"]["permissions"]["actions"] == "read"
-    assert jobs["publish-checks"]["permissions"] == {
+    assert job["permissions"] == {
         "contents": "read",
-        "pull-requests": "read",
+        "actions": "read",
+        "statuses": "read",
         "checks": "write",
-    }
-    assert jobs["publish-labels"]["permissions"] == {
-        "contents": "read",
         "pull-requests": "write",
         "issues": "write",
     }
-    assert jobs["publish-labels"]["needs"] == ["prepare", "observe", "publish-checks"]
-    assert "needs.publish-checks.result == 'success'" in jobs["publish-labels"]["if"]
-    assert "needs.prepare.outputs.checks == 'false'" in jobs["publish-labels"]["if"]
-    assert "needs.prepare.outputs.labels == 'true'" in jobs["publish-labels"]["if"]
-    for name in ("mark", "publish-checks"):
-        assert jobs[name]["concurrency"] == {
-            "group": "autonomous-merge-check-writer",
-            "cancel-in-progress": "false",
-        }
-    for name, job in jobs.items():
-        calls = [
-            step
-            for step in job["steps"]
-            if step.get("uses", "").startswith(ACTION_REPOSITORY + "@")
-        ]
-        assert len(calls) == 1
-        step = calls[0]
-        assert step["uses"] == ACTION_REPOSITORY + "@" + action_ref
-        values = step["with"]
-        assert values["action-ref"] == action_ref
-        assert values["operation"] == ("validate-config" if name == "validate" else name)
-        if name == "validate":
-            assert values["config-sha"] == "${{ github.event.pull_request.head.sha || github.sha }}"
-        elif name == "prepare":
-            assert "config-sha" not in values
-        else:
-            assert values["config-sha"] == "${{ needs.prepare.outputs.config-sha }}"
-        for item in job["steps"]:
-            uses = item.get("uses", "")
-            assert not uses.startswith(("actions/checkout@", "./"))
-            if "artifact@" in uses:
-                assert "${{ github.run_id }}-${{ github.run_attempt }}" in item["with"]["name"]
-                if "upload-artifact@" in uses:
-                    assert item["with"]["retention-days"] == "30"
-                    assert item["with"]["if-no-files-found"] == "error"
-                    assert item["if"] == ("failure()" if name == "prepare" else "always()")
+    assert job["steps"] == [{"uses": ACTION_REPOSITORY + "@" + action_ref}]
 
 
 def main() -> None:
@@ -133,11 +85,18 @@ def main() -> None:
     example = load(ROOT / "examples/pr-merge-readiness.yml")
     assert example["on"]["workflow_run"]["workflows"] == minimal["ci"]["workflows"]
     check_runtime(example, minimal["action_ref"])
+    assert set(example["on"]) == {
+        "workflow_run",
+        "pull_request_target",
+        "workflow_dispatch",
+        "pull_request",
+        "push",
+    }
     snippets = re.findall(r"```yaml\n(.*?)\n```", (ROOT / "README.md").read_text(), re.DOTALL)
     assert len(snippets) == 1
     quickstart = yaml.load(snippets[0], Loader=yaml.BaseLoader)
     assert set(quickstart["on"]) == {"workflow_dispatch"}
-    assert all(value == "read" for value in quickstart["jobs"]["observe"]["permissions"].values())
+    check_runtime(quickstart, minimal["action_ref"])
     workflows = [example, quickstart]
     for path in (ROOT / ".github/workflows").glob("*.yml"):
         workflow = load(path)
@@ -160,7 +119,7 @@ def main() -> None:
             assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", uses), uses
         assert not uses.startswith("actions/setup-python@")
         if uses.startswith(ACTION_REPOSITORY + "@"):
-            assert step["with"]["action-ref"] == uses.split("@")[1]
+            assert step.get("with", {}).get("action-ref", uses.split("@")[1]) == uses.split("@")[1]
         if uses.startswith("astral-sh/setup-uv@"):
             uv_setups += 1
             assert step["with"]["python-version"] == "3.14"
