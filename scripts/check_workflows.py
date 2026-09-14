@@ -57,6 +57,7 @@ def check_runtime(workflow: dict[str, Any], action_ref: str) -> None:
     assert job["concurrency"] == {
         "group": "autonomous-merge-check-writer",
         "cancel-in-progress": "false",
+        "queue": "max",
     }
     assert job["permissions"] == {
         "contents": "read",

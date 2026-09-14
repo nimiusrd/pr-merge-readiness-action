@@ -32,6 +32,7 @@ jobs:
     concurrency:
       group: autonomous-merge-check-writer
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       actions: read
@@ -59,7 +60,9 @@ PR 番号が空なら全 open PR、指定するとその PR を観測します�
 
 自動入口の job は、観測と公開に必要な権限をまとめて持ちます。設定検証時も同じ権限設定ですが、検証経路は設定の読み取りだけで終了し、観測・公開へ進みません。PR のソースコードを checkout・実行しません。fork PR で token が読み取り専用になっても設定検証は可能です。
 
-同じ Check を更新する job の concurrency group は `autonomous-merge-check-writer` に統一します。自動入口では設定検証・観測・保存・公開を含む job 全体が直列化されます。`cancel-in-progress: false` は実行中の job の自動キャンセルを防ぎますが、GitHub の既定の待機枠では新しい job が以前の待機中 job を置き換える場合があります。
+workflow を編集できる書き込み権限者は信頼対象です。GitHub ではこの権限者が `permissions` も編集できるため、Action の検証経路や同じ workflow 内の job 分離は、workflow 定義の改変を防ぐ境界にはなりません。外部 fork の `pull_request` には GitHub の読み取り専用 token 制限が適用されます。[GitHub の権限設定](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)を参照してください。
+
+同じ Check を更新する job の concurrency group は `autonomous-merge-check-writer` に統一します。自動入口では設定検証・観測・保存・公開を含む job 全体が直列化されます。`cancel-in-progress: false` と `queue: max` により、実行中の job を止めず、手動ラベル要求を含む最大100件の job を待機させます。後続イベントは既存の待機要求を置き換えません。待機枠が満杯の場合は追加の要求がキャンセルされるため、その手動要求は空きができてから再実行してください。[GitHub のキュー仕様](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)に従います。
 
 [イベント対応・更新・個別 operation の使い方](docs/workflow.md)も参照してください。再利用可能 workflow と workflow 生成器は提供しません。
 

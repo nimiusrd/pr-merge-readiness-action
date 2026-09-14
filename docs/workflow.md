@@ -26,7 +26,9 @@ PR 状態変更には `pull_request_target` を使います。タイトル・本
 
 1 job は contents・actions・statuses の read と、checks・pull-requests・issues の write を持ちます。設定検証時も job の権限設定は共通ですが、検証コードは読み取りだけで動作します。fork PR の読み取り専用 token でも検証できます。
 
-Check writer の concurrency group は `autonomous-merge-check-writer`、`cancel-in-progress` は `false` に統一します。設定検証から公開まで job 全体を直列化し、ラベル用の別 group は不要です。GitHub の既定の待機枠では、新しい job が以前の待機中 job を置き換える場合があります。
+workflow を編集できる書き込み権限者は信頼対象です。この権限者は `permissions` 自体も編集できるため、Action の読み取り専用経路や同じ workflow 内の job 分離は workflow 定義の改変を防ぐ境界ではありません。外部 fork の `pull_request` は GitHub の読み取り専用 token 制限に従います。
+
+Check writer の concurrency group は `autonomous-merge-check-writer`、`cancel-in-progress` は `false`、`queue` は `max` に統一します。設定検証から公開まで job 全体を直列化し、手動ラベル要求も同じキューで最大100件まで待機させます。後続の通常イベントで既存の手動要求を置き換えず、ラベル用の別 group は不要です。待機枠が満杯の場合は追加の要求がキャンセルされるため、その手動要求は空きができてから再実行してください。[GitHub のキュー仕様](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)を参照できます。
 
 ## 保存と失敗
 
