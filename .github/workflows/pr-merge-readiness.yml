@@ -1,5 +1,4 @@
-# Copy this workflow and minimal.toml to your repository's .github directory.
-# Pinned to v0.3.0; update all uses / action-ref values together.
+# uses と TOML の action_ref を同じ40桁 SHA に固定します。
 name: PR Merge Readiness
 
 on:
@@ -25,143 +24,20 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: ${{ inputs.update-labels && 'autonomous-merge-labels' || format('readiness-{0}-{1}', github.run_id, github.run_attempt) }}
-  cancel-in-progress: false
-
 jobs:
-  validate:
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+  readiness:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: nimiusrd/pr-merge-readiness-action@b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-        with:
-          operation: validate-config
-          action-ref: b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-          config-path: .github/pr-merge-readiness.toml
-          config-sha: ${{ github.event.pull_request.head.sha || github.sha }}
-
-  prepare:
-    if: github.event_name != 'pull_request' && github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    outputs:
-      config-sha: ${{ steps.prepare.outputs.config-sha }}
-      operation: ${{ steps.prepare.outputs.operation }}
-      checks: ${{ steps.prepare.outputs.checks }}
-      labels: ${{ steps.prepare.outputs.labels }}
-      pr-number: ${{ steps.prepare.outputs.pr-number }}
-    steps:
-      - id: prepare
-        uses: nimiusrd/pr-merge-readiness-action@b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-        with:
-          operation: prepare
-          action-ref: b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-      - name: Save preparation failure
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: pr-merge-readiness-preparation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: preparation-report/
-          if-no-files-found: error
-          retention-days: 30
-
-  mark:
-    needs: prepare
-    if: needs.prepare.outputs.operation == 'mark'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     concurrency:
       group: autonomous-merge-check-writer
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
-      pull-requests: read
-      checks: write
       actions: read
-    steps:
-      - uses: nimiusrd/pr-merge-readiness-action@b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-        with:
-          operation: mark
-          action-ref: b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-          config-sha: ${{ needs.prepare.outputs.config-sha }}
-
-  observe:
-    needs: prepare
-    if: needs.prepare.outputs.operation == 'observe'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      pull-requests: read
-      checks: read
       statuses: read
-    steps:
-      - uses: nimiusrd/pr-merge-readiness-action@b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-        with:
-          operation: observe
-          action-ref: b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-          config-sha: ${{ needs.prepare.outputs.config-sha }}
-          pr-number: ${{ needs.prepare.outputs.pr-number }}
-          report-dir: readiness-report
-          artifact-name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Save this attempt's observations
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
-          path: readiness-report/
-          if-no-files-found: error
-          retention-days: 30
-
-  publish-checks:
-    needs: [prepare, observe]
-    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.checks == 'true' && (needs.observe.result == 'success' || needs.observe.result == 'failure') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency:
-      group: autonomous-merge-check-writer
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      pull-requests: read
       checks: write
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
-          path: readiness-report
-      - uses: nimiusrd/pr-merge-readiness-action@b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-        with:
-          operation: publish-checks
-          action-ref: b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-          config-sha: ${{ needs.prepare.outputs.config-sha }}
-          report-dir: readiness-report
-          artifact-name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
-
-  publish-labels:
-    needs: [prepare, observe, publish-checks]
-    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.labels == 'true' && (needs.observe.result == 'success' || needs.observe.result == 'failure') && ((needs.prepare.outputs.checks == 'true' && needs.publish-checks.result == 'success') || (needs.prepare.outputs.checks == 'false' && needs.publish-checks.result == 'skipped')) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
       pull-requests: write
       issues: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
-          path: readiness-report
-      - uses: nimiusrd/pr-merge-readiness-action@b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-        with:
-          operation: publish-labels
-          action-ref: b3a6259c4b6dae30ebf5fd60c0aeac5ead0819f7
-          config-sha: ${{ needs.prepare.outputs.config-sha }}
-          report-dir: readiness-report
-          artifact-name: pr-merge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: nimiusrd/pr-merge-readiness-action@21fa2df95fc615847ba7e1a24e9c77bd5d1323fb
