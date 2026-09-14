@@ -53,7 +53,13 @@ def main() -> int:
         tarfile.TarError,
     ) as error:
         print(json.dumps({"error": str(error)}))
-        if args.command == "action" and os.environ.get("PMR_OPERATION") == "prepare":
+        operation = os.environ.get("PMR_OPERATION") or "run"
+        preparing = operation == "prepare" or (
+            operation == "run"
+            and os.environ.get("GITHUB_EVENT_NAME")
+            in {"workflow_dispatch", "workflow_run", "pull_request_target"}
+        )
+        if args.command == "action" and preparing:
             save_failure(Path("preparation-report"), error)
         elif args.command == "action" and os.environ.get("PMR_OPERATION") == "observe":
             save_failure(Path(os.environ.get("PMR_REPORT_DIR") or "readiness-report"), error)

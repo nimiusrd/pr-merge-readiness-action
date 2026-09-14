@@ -17,6 +17,35 @@ def load(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], yaml.load(path.read_text(), Loader=yaml.BaseLoader))
 
 
+def check_action_flow(action: dict[str, Any]) -> None:
+    assert action["inputs"]["operation"]["default"] == "run"
+    assert action["inputs"]["action-ref"].get("required", "false") == "false"
+    steps = {step["id"]: step for step in action["runs"]["steps"] if "id" in step}
+    assert list(steps) == ["run", "preparation", "execute", "observations", "checks", "labels"]
+    assert "continue-on-error" not in steps["execute"]  # 観測失敗を Action 全体に残す。
+    for name in ("execute", "checks", "labels"):
+        assert steps[name]["env"]["PMR_CONFIG_SHA"] == "${{ steps.run.outputs.config-sha }}"
+        assert steps[name]["env"]["PMR_REPORT_DIR"] == "${{ steps.run.outputs.report-dir }}"
+    assert "steps.run.outcome == 'failure'" in steps["preparation"]["if"]
+    assert "always()" in steps["observations"]["if"]
+    assert "steps.execute.outcome == 'failure'" in steps["observations"]["if"]
+    for name in ("preparation", "observations"):
+        step = steps[name]
+        assert step["uses"].startswith("actions/upload-artifact@")
+        assert step["with"]["retention-days"] == "30"
+        assert step["with"]["if-no-files-found"] == "error"
+    for name in ("checks", "labels"):
+        condition = steps[name]["if"]
+        assert "!cancelled()" in condition
+        assert "steps.run.outcome == 'success'" in condition
+        assert "steps.observations.outcome == 'success'" in condition
+    assert "steps.run.outputs.checks == 'true'" in steps["checks"]["if"]
+    assert "steps.run.outputs.labels == 'true'" in steps["labels"]["if"]
+    assert "steps.checks.outcome == 'success'" in steps["labels"]["if"]
+    assert "steps.run.outputs.checks == 'false'" in steps["labels"]["if"]
+    assert "steps.checks.outcome == 'skipped'" in steps["labels"]["if"]
+
+
 def check_runtime(workflow: dict[str, Any], action_ref: str) -> None:
     jobs = workflow["jobs"]
     assert set(jobs) == {
@@ -91,6 +120,7 @@ def check_runtime(workflow: dict[str, Any], action_ref: str) -> None:
 def main() -> None:
     action = load(ROOT / "action.yml")
     assert action["runs"]["using"] == "composite"
+    check_action_flow(action)
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert (ROOT / ".python-version").read_text().strip() == "3.14"
     assert project["project"]["requires-python"] == ">=3.14"

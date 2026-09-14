@@ -117,7 +117,7 @@ def route(
     return "skip"
 
 
-def prepare(config: Config, config_sha: str) -> int:
+def prepare(config: Config, config_sha: str, *, automatic: bool = False) -> int:
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     inputs = event.get("inputs", {})
     if inputs is None:
@@ -134,15 +134,24 @@ def prepare(config: Config, config_sha: str) -> int:
     operation = route(os.environ["GITHUB_EVENT_NAME"], event, config, pr_number, update_labels)
     if operation == "mark" and not config["publication"]["checks"]:
         operation = "skip"
-    output(
-        {
-            "config-sha": config_sha,
-            "operation": operation,
-            "checks": str(config["publication"]["checks"]).lower(),
-            "labels": str(update_labels).lower(),
-            "pr-number": pr_number,
-        }
-    )
+    values = {
+        "config-sha": config_sha,
+        "operation": operation,
+        "checks": str(config["publication"]["checks"]).lower(),
+        "labels": str(update_labels).lower(),
+        "pr-number": pr_number,
+    }
+    if automatic and operation == "observe":
+        name = artifact_name(os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"])
+        directory = (Path(os.environ.get("RUNNER_TEMP", ".")) / name).resolve()
+        values.update(
+            {
+                "report-dir": str(directory),
+                "manifest": str(directory / "manifest.json"),
+                "artifact-name": name,
+            }
+        )
+    output(values)
     return 0
 
 
@@ -161,8 +170,29 @@ def run_action() -> int:
             "artifact-name",
         )
     }
-    operation = values["operation"]
-    if operation not in {
+    operation = values["operation"] or "run"
+    automatic = operation == "run"
+    if automatic:
+        if any(
+            values[key]
+            for key in ("config-sha", "pr-number", "event-path", "report-dir", "artifact-name")
+        ):
+            raise EvaluationError("run derives configuration, PR, event and report inputs")
+        event_name = os.environ["GITHUB_EVENT_NAME"]
+        if event_name == "pull_request":
+            event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+            values["config-sha"] = event["pull_request"]["head"]["sha"]
+            operation = "validate-config"
+        elif event_name == "push":
+            values["config-sha"] = os.environ["GITHUB_SHA"]
+            operation = "validate-config"
+        elif event_name in {"workflow_dispatch", "workflow_run", "pull_request_target"}:
+            operation = "prepare"
+        else:
+            operation = "skip"
+    values["action-ref"] = values["action-ref"] or os.environ.get("PMR_SOURCE_REF", "")
+    values["config-path"] = values["config-path"] or ".github/pr-merge-readiness.toml"
+    if not (automatic and operation == "skip") and operation not in {
         "prepare",
         "validate-config",
         "observe",
@@ -188,6 +218,9 @@ def run_action() -> int:
     if operation == "mark" and (values["report-dir"] or values["artifact-name"]):
         raise EvaluationError("mark does not use reports or artifacts")
     verify_source(values["action-ref"])
+    if automatic and operation == "skip":
+        output({"operation": "skip"})
+        return 0
     api = GitHub(values["repository"] or os.environ["GITHUB_REPOSITORY"])
     if api.repository != os.environ["GITHUB_REPOSITORY"]:
         raise EvaluationError("repository must match the workflow context")
@@ -197,8 +230,10 @@ def run_action() -> int:
         api, values["config-path"], values["config-sha"], values["action-ref"]
     )
     if operation == "prepare":
-        return prepare(config, config_sha)
+        return prepare(config, config_sha, automatic=automatic)
     if operation == "validate-config":
+        if automatic:
+            output({"operation": "validate-config"})
         output({"config-sha": config_sha})
         print(json.dumps({"valid": True, "config_sha": config_sha}))
         return 0

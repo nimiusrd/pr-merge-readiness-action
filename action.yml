@@ -3,11 +3,10 @@ description: Observe PR metadata and publish reference Checks or manually reques
 author: nimiusrd
 inputs:
   operation:
-    description: prepare, validate-config, observe, mark, publish-checks, or publish-labels
-    required: true
+    description: run (automatic flow), prepare, validate-config, observe, mark, publish-checks, or publish-labels
+    default: run
   action-ref:
-    description: Full 40-character source commit SHA
-    required: true
+    description: Full source commit SHA; defaults to the actual pinned Action reference
   config-path:
     description: Configuration path on the trusted default branch
     default: .github/pr-merge-readiness.toml
@@ -29,16 +28,16 @@ inputs:
     default: ${{ github.token }}
 outputs:
   operation:
-    description: Next operation selected by prepare (observe, mark, or skip)
+    description: Operation selected by run or prepare (validate-config, observe, mark, or skip)
     value: ${{ steps.run.outputs.operation }}
   checks:
-    description: Whether Check publication is enabled (prepare only)
+    description: Whether Check publication is enabled (run or prepare)
     value: ${{ steps.run.outputs.checks }}
   labels:
-    description: Whether the event explicitly requests labels (prepare only)
+    description: Whether the event explicitly requests labels (run or prepare)
     value: ${{ steps.run.outputs.labels }}
   pr-number:
-    description: Validated manual PR selection (prepare only)
+    description: Validated manual PR selection (run or prepare)
     value: ${{ steps.run.outputs.pr-number }}
   config-sha:
     description: Trusted configuration commit
@@ -77,5 +76,81 @@ runs:
         PMR_EVENT_PATH: ${{ inputs.event-path }}
         PMR_REPORT_DIR: ${{ inputs.report-dir }}
         PMR_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: bash "$PMR_ROOT/run.sh" action
+
+    - id: preparation
+      name: Save preparation failure
+      if: ${{ failure() && inputs.operation == 'run' && steps.run.outcome == 'failure' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_run' || github.event_name == 'pull_request_target') }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: pr-merge-readiness-preparation-${{ github.run_id }}-${{ github.run_attempt }}
+        path: preparation-report/
+        if-no-files-found: error
+        retention-days: 30
+    - id: execute
+      name: Observe or mark
+      if: inputs.operation == 'run' && (steps.run.outputs.operation == 'observe' || steps.run.outputs.operation == 'mark')
+      shell: bash
+      env:
+        PMR_ROOT: ${{ github.action_path }}
+        PMR_SOURCE_REF: ${{ github.action_ref }}
+        PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
+        PMR_OPERATION: ${{ steps.run.outputs.operation }}
+        PMR_ACTION_REF: ${{ inputs.action-ref }}
+        PMR_CONFIG_PATH: ${{ inputs.config-path }}
+        PMR_CONFIG_SHA: ${{ steps.run.outputs.config-sha }}
+        PMR_REPOSITORY: ${{ inputs.repository }}
+        PMR_REPORT_DIR: ${{ steps.run.outputs.report-dir }}
+        PMR_ARTIFACT_NAME: ${{ steps.run.outputs.artifact-name }}
+        GH_TOKEN: ${{ inputs.token }}
+        PMR_PR_NUMBER: ${{ steps.run.outputs.pr-number }}
+        PMR_EVENT_PATH: ''
+      run: bash "$PMR_ROOT/run.sh" action
+    - id: observations
+      name: Save observations
+      if: ${{ always() && inputs.operation == 'run' && steps.run.outputs.operation == 'observe' && (steps.execute.outcome == 'success' || steps.execute.outcome == 'failure') }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: ${{ steps.run.outputs.artifact-name }}
+        path: ${{ steps.run.outputs.report-dir }}
+        if-no-files-found: error
+        retention-days: 30
+    - id: checks
+      name: Publish Checks
+      if: ${{ !cancelled() && inputs.operation == 'run' && steps.run.outcome == 'success' && steps.observations.outcome == 'success' && steps.run.outputs.checks == 'true' }}
+      shell: bash
+      env:
+        PMR_ROOT: ${{ github.action_path }}
+        PMR_SOURCE_REF: ${{ github.action_ref }}
+        PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
+        PMR_OPERATION: publish-checks
+        PMR_PR_NUMBER: ''
+        PMR_EVENT_PATH: ''
+        PMR_ACTION_REF: ${{ inputs.action-ref }}
+        PMR_CONFIG_PATH: ${{ inputs.config-path }}
+        PMR_CONFIG_SHA: ${{ steps.run.outputs.config-sha }}
+        PMR_REPOSITORY: ${{ inputs.repository }}
+        PMR_REPORT_DIR: ${{ steps.run.outputs.report-dir }}
+        PMR_ARTIFACT_NAME: ${{ steps.run.outputs.artifact-name }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: bash "$PMR_ROOT/run.sh" action
+    - id: labels
+      name: Publish manually requested labels
+      if: ${{ !cancelled() && inputs.operation == 'run' && steps.run.outcome == 'success' && steps.observations.outcome == 'success' && steps.run.outputs.labels == 'true' && ((steps.run.outputs.checks == 'true' && steps.checks.outcome == 'success') || (steps.run.outputs.checks == 'false' && steps.checks.outcome == 'skipped')) }}
+      shell: bash
+      env:
+        PMR_ROOT: ${{ github.action_path }}
+        PMR_SOURCE_REF: ${{ github.action_ref }}
+        PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
+        PMR_OPERATION: publish-labels
+        PMR_PR_NUMBER: ''
+        PMR_EVENT_PATH: ''
+        PMR_ACTION_REF: ${{ inputs.action-ref }}
+        PMR_CONFIG_PATH: ${{ inputs.config-path }}
+        PMR_CONFIG_SHA: ${{ steps.run.outputs.config-sha }}
+        PMR_REPOSITORY: ${{ inputs.repository }}
+        PMR_REPORT_DIR: ${{ steps.run.outputs.report-dir }}
+        PMR_ARTIFACT_NAME: ${{ steps.run.outputs.artifact-name }}
         GH_TOKEN: ${{ inputs.token }}
       run: bash "$PMR_ROOT/run.sh" action
