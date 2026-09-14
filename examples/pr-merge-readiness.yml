@@ -35,4 +35,4 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@REPLACE_WITH_RELEASE_COMMIT_SHA
+      - uses: nimiusrd/pr-merge-readiness-action@27ca8908b993e93eb319c70e7231fa7fd1999b05

@@ -6,7 +6,7 @@ GitHub の PR・レビュー・変更履歴を読み取り、レビュー条件�
 
 CI の待機・成功・失敗・再実行履歴は GitHub Checks に任せます。この Action は CI の結果、commit status、`mergeStateStatus` を収集・判定・レポート化しません。CI 定義ファイルの変更は、変更内容に対するレビュー条件として扱います。
 
-> この文書と `examples/` は次版（未公開）の仕様です。設定は version 2、観測・レポートは schema version 2 です。公開済み v0.4.0 とは互換性がありません。リポジトリ内の `.github/` は公開済み版の運用設定を維持しており、[移行手順](docs/workflow.md#公開後の移行)に従って新しい実装 SHA と同時に切り替えます。
+> 設定は version 2、観測・レポートは schema version 2 です。`.github/` と利用例は [version 2 対応の公開済み実装](https://github.com/nimiusrd/pr-merge-readiness-action/commit/27ca8908b993e93eb319c70e7231fa7fd1999b05) に固定しています。v0.4.0 の設定・レポートとは互換性がないため、既存の利用側は [移行手順](docs/workflow.md#公開後の移行)に従い Action SHA と設定を同時に切り替えてください。
 
 ## クイックスタート
 
@@ -43,10 +43,10 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@REPLACE_WITH_RELEASE_COMMIT_SHA
+      - uses: nimiusrd/pr-merge-readiness-action@27ca8908b993e93eb319c70e7231fa7fd1999b05
 ```
 
-`uses:` と設定の `action_ref` の `REPLACE_WITH_RELEASE_COMMIT_SHA` を、この仕様を含む公開済み Action の同じ **40 桁 commit SHA** に置き換えます。公開前のテンプレートをそのまま運用には使えません。入力 `action-ref` は実際の参照から取得するため、省略できます。
+`uses:` と設定の `action_ref` は同じ **40 桁 commit SHA** に固定します。この例は version 2 対応の公開済み実装 `27ca8908b993e93eb319c70e7231fa7fd1999b05` を使用します。入力 `action-ref` は実際の参照から取得するため、省略できます。
 
 既定の `operation: run` が、イベントと TOML の設定から設定検証・観測・Check・ラベル更新を選びます。呼び出し側は **1 job・1 step** で利用でき、`if`、`needs`、設定 SHA の受け渡し、artifact の upload/download を組み立てる必要はありません。Python の導入と実装の起動も Action 内で行い、利用側の checkout は不要です。
 
@@ -72,7 +72,7 @@ workflow を編集できる書き込み権限者は信頼対象です。GitHub �
 
 ```toml
 version = 2
-action_ref = "REPLACE_WITH_RELEASE_COMMIT_SHA"
+action_ref = "27ca8908b993e93eb319c70e7231fa7fd1999b05"
 
 [review]
 minimum_approvals = 0

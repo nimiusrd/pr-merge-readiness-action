@@ -13,16 +13,8 @@ sys.path.insert(0, str(ROOT))
 from pr_merge_readiness.config import ACTION_REPOSITORY, validate_config
 
 
-def template_source(text: str) -> str:
-    """未公開版のテンプレートは検証時だけ固定SHAを設定する。運用ファイルには使わない。"""
-    return text.replace("REPLACE_WITH_RELEASE_COMMIT_SHA", "f" * 40)
-
-
 def load(path: Path) -> dict[str, Any]:
-    text = path.read_text()
-    if path.parent == ROOT / "examples":
-        text = template_source(text)
-    return cast(dict[str, Any], yaml.load(text, Loader=yaml.BaseLoader))
+    return cast(dict[str, Any], yaml.load(path.read_text(), Loader=yaml.BaseLoader))
 
 
 def check_action_flow(action: dict[str, Any]) -> None:
@@ -54,9 +46,7 @@ def check_action_flow(action: dict[str, Any]) -> None:
     assert "steps.checks.outcome == 'skipped'" in steps["labels"]["if"]
 
 
-def check_runtime(
-    workflow: dict[str, Any], action_ref: str, extra_reads: tuple[str, ...] = ()
-) -> None:
+def check_runtime(workflow: dict[str, Any], action_ref: str) -> None:
     assert workflow["permissions"] == {}
     assert "concurrency" not in workflow
     assert set(workflow["jobs"]) == {"readiness"}
@@ -71,7 +61,6 @@ def check_runtime(
     }
     assert job["permissions"] == {
         "contents": "read",
-        **{name: "read" for name in extra_reads},
         "checks": "write",
         "pull-requests": "write",
         "issues": "write",
@@ -91,9 +80,7 @@ def main() -> None:
     assert project["tool"]["ruff"]["target-version"] == "py314"
     for name in ("operation", "checks", "labels", "pr-number", "config-sha"):
         assert action["outputs"][name]["value"] == "${{ steps.run.outputs." + name + " }}"
-    minimal = validate_config(
-        tomllib.loads(template_source((ROOT / "examples/minimal.toml").read_text()))
-    )
+    minimal = validate_config(tomllib.loads((ROOT / "examples/minimal.toml").read_text()))
     example = load(ROOT / "examples/pr-merge-readiness.yml")
     check_runtime(example, minimal["action_ref"])
     assert set(example["on"]) == {
@@ -104,7 +91,7 @@ def main() -> None:
     }
     snippets = re.findall(r"```yaml\n(.*?)\n```", (ROOT / "README.md").read_text(), re.DOTALL)
     assert len(snippets) == 1
-    quickstart = yaml.load(template_source(snippets[0]), Loader=yaml.BaseLoader)
+    quickstart = yaml.load(snippets[0], Loader=yaml.BaseLoader)
     assert set(quickstart["on"]) == {"workflow_dispatch"}
     check_runtime(quickstart, minimal["action_ref"])
     workflows = [example, quickstart]
@@ -112,12 +99,12 @@ def main() -> None:
         workflow = load(path)
         workflows.append(workflow)
         if path.name == "pr-merge-readiness.yml":
-            # 公開済みv0.4.0の運用設定。次版公開時にusesとversion 2設定を同時に切り替える。
-            own = tomllib.loads((ROOT / ".github/pr-merge-readiness.toml").read_text())
-            assert own["version"] == 1
-            assert own["action_ref"] == "21fa2df95fc615847ba7e1a24e9c77bd5d1323fb"
-            check_runtime(workflow, own["action_ref"], ("actions", "statuses"))
-            assert workflow["on"]["workflow_run"]["workflows"] == own["ci"]["workflows"]
+            own = validate_config(
+                tomllib.loads((ROOT / ".github/pr-merge-readiness.toml").read_text())
+            )
+            assert own["action_ref"] == minimal["action_ref"]
+            check_runtime(workflow, own["action_ref"])
+            assert workflow == example
     steps = list(action["runs"]["steps"])
     for workflow in workflows:
         assert "on" in workflow and "jobs" in workflow
@@ -149,7 +136,7 @@ def main() -> None:
         "uv run --locked python scripts/check_workflows.py",
     } <= commands
     for path in (ROOT / "examples").glob("*.toml"):
-        validate_config(tomllib.loads(template_source(path.read_text())))
+        validate_config(tomllib.loads(path.read_text()))
     print("Workflow and Action validation passed")
 
 

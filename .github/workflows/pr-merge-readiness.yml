@@ -2,9 +2,6 @@
 name: PR Merge Readiness
 
 on:
-  workflow_run:
-    workflows: [CI] # Match ci.workflows in the TOML configuration.
-    types: [in_progress, completed]
   pull_request_target:
     types: [opened, reopened, synchronize, edited, ready_for_review, converted_to_draft, closed]
   workflow_dispatch:
@@ -34,10 +31,8 @@ jobs:
       queue: max
     permissions:
       contents: read
-      actions: read
-      statuses: read
       checks: write
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@21fa2df95fc615847ba7e1a24e9c77bd5d1323fb
+      - uses: nimiusrd/pr-merge-readiness-action@27ca8908b993e93eb319c70e7231fa7fd1999b05

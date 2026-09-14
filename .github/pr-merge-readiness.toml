@@ -1,9 +1,6 @@
-# v0.4.0 の実装 SHA。workflow の uses も同じ SHA に指定します。
-version = 1
-action_ref = "21fa2df95fc615847ba7e1a24e9c77bd5d1323fb"
-
-[ci]
-workflows = ["CI"]
+# 設定 version 2 対応の実装 SHA。workflow の uses も同じ SHA に指定します。
+version = 2
+action_ref = "27ca8908b993e93eb319c70e7231fa7fd1999b05"
 
 [review]
 minimum_approvals = 0
@@ -13,8 +10,3 @@ stale_change_review_days = 30
 [publication]
 checks = true
 labels = "manual"
-
-[[ci.required_checks]]
-kind = "check_run"
-name = "test"
-app_id = 15368
