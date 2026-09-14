@@ -1,6 +1,6 @@
 # 1回の Action 呼出しで処理する
 
-[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、CI workflow 名と Check の名前・発行元を合わせてください。
+[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、レビュー条件を合わせてください。次版公開後、`REPLACE_WITH_RELEASE_COMMIT_SHA` をその公開済みの40桁 SHA に置き換えて利用します。
 
 通常の workflow から Composite Action を1回呼び出します。呼び出し側は起動条件、手動入力、runner、timeout、権限、concurrency を管理し、処理の分岐・順序・レポート保存を Action に任せます。checkout、再利用可能 workflow、生成コマンドは不要です。
 
@@ -10,21 +10,23 @@
 | --- | --- |
 | 設定・workflow の `pull_request` | PR head の TOML を検証して終了 |
 | 設定・workflow の `push` | push 対象 SHA の TOML を検証して終了 |
-| 対象 CI 開始（`workflow_run: in_progress`） | 未観測表示 |
-| PR の opened／reopened／synchronize／ready_for_review／converted_to_draft、base の編集 | 未観測表示 |
-| 対象 CI 完了（`workflow_run: completed`） | 全 open PR を観測 → 保存 → Check |
+| PR の opened／reopened／synchronize／ready_for_review／converted_to_draft、base の編集（`pull_request_target`） | 当該 PR を観測 → 保存 → Check |
 | PR 終了（`pull_request_target: closed`） | 当該 PR を観測 → 保存 → Check |
 | Run workflow、PR 番号指定 | 指定 PR を観測 → 保存 → Check |
 | Run workflow、番号なし | 全 open PR を観測 → 保存 → Check |
 | Run workflow、`update-labels = true` | 全 open PR を観測 → 保存 → Check → ラベル |
 
-PR 状態変更には `pull_request_target` を使います。タイトル・本文だけの編集は処理を省略します。承認イベントと日次実行は起動条件にしません。手動ラベル更新と PR 番号指定は併用できません。Check が無効ならその公開段階を省略します。`on.workflow_run.workflows` と TOML の `ci.workflows` は同じ名前にします。
+PR 状態変更には `pull_request_target` を使います。タイトル・本文だけの編集は処理を省略します。承認イベントと日次実行は起動条件にしません。手動ラベル更新と PR 番号指定は併用できません。Check が無効ならその公開段階を省略します。CI の開始・完了・再実行では起動しません。レビュー・スレッド解決・base ブランチへの新しい push をすぐに反映する場合は Run workflow を使います。
+
+open PR の競合判定が `UNKNOWN` の場合、観測開始時と最終確認時のそれぞれで、2秒間隔・最大5回の追加取得を行います。確定した場合は同時に取得した head・base などを含む情報で観測と鮮度の確認を行います。上限後も未確定なら `UNKNOWN` を保存し、充足扱いにはしません。その後の確定を反映するには新しい PR イベントまたは Run workflow が必要です。closed／merged PR は確定待ちをしません。
+
+ラベルの同期タイミングは、`update-labels = true` を指定した手動実行だけです。レビュー・変更履歴の条件で open PR のラベルを決め、closed／merged PR の管理ラベルは除去します。Draft・競合・open/closed 状態だけではラベル用の判定を変えません。PR 状態のイベントは、参考 Check とレポートを更新するために維持します。
 
 ## 設定と権限
 
 運用時は default branch の設定 SHA を一度確定し、後続処理で同じ設定を使います。途中で default branch が進んでも再解決しません。設定・レポートの出所と Action の実ソースの SHA を照合します。`pull_request`・`push` の検証対象設定からは観測・公開へ進まず、PR のソースコードも実行しません。
 
-1 job は contents・actions・statuses の read と、checks・pull-requests・issues の write を持ちます。設定検証時も job の権限設定は共通ですが、検証コードは読み取りだけで動作します。fork PR の読み取り専用 token でも検証できます。
+1 job は contents の read と、checks・pull-requests・issues の write を持ちます。設定検証時も job の権限設定は共通ですが、検証コードは読み取りだけで動作します。fork PR の読み取り専用 token でも検証できます。
 
 workflow を編集できる書き込み権限者は信頼対象です。この権限者は `permissions` 自体も編集できるため、Action の読み取り専用経路や同じ workflow 内の job 分離は workflow 定義の改変を防ぐ境界ではありません。外部 fork の `pull_request` は GitHub の読み取り専用 token 制限に従います。
 
@@ -44,7 +46,7 @@ Action が今回の観測を `pr-merge-readiness-RUN_ID-ATTEMPT` に30日保存�
 
 ## 個別 operation と更新
 
-`operation` を明示すると、従来の `prepare`・`validate-config`・`observe`・`mark`・`publish-checks`・`publish-labels` を個別に利用できます。read-only の観測だけを行う用途などで使います。個別利用では呼び出し側が同じ設定 SHA の引き継ぎ、artifact 保存、公開順序、限定権限を管理します。自動保存は既定の `run` だけが行います。
+`operation` を明示すると、`prepare`・`validate-config`・`observe`・`publish-checks`・`publish-labels` を個別に利用できます。read-only の観測だけを行う用途などで使います。個別利用では呼び出し側が同じ設定 SHA の引き継ぎ、artifact 保存、公開順序、限定権限を管理します。自動保存は既定の `run` だけが行います。
 
 ローカルで TOML を検証する場合は、固定版 Action の CLI を使用できます。
 
@@ -54,6 +56,18 @@ bash /absolute/path/to/pr-merge-readiness-action/run.sh validate-config \
   --config .github/pr-merge-readiness.toml
 ```
 
-Action 更新時は TOML の `action_ref` と workflow の `uses:` を同じ公開済み SHA にまとめて変更します。明示した `action-ref` 入力がある場合はそれも更新します。CI workflow 名を変える場合は TOML と `on.workflow_run.workflows` を合わせます。
+Action 更新時は TOML の `action_ref` と workflow の `uses:` を同じ公開済み SHA にまとめて変更します。明示した `action-ref` 入力がある場合はそれも更新します。
 
-同じ Check・ラベルを更新する既存 writer から切り替える場合は、実行終了を確認してから入口を一つの変更で切り替えます。切り戻しは workflow と TOML を同時に revert します。判定・レポート形式は変わらず、artifact の変換も行いません。
+同じ Check・ラベルを更新する既存 writer から切り替える場合は、実行終了を確認してから入口を一つの変更で切り替えます。切り戻しは workflow と TOML を同時に revert します。旧 artifact の変換は行いません。
+
+## 公開後の移行
+
+次版の実装を公開するまで、このリポジトリと利用側の `.github/pr-merge-readiness.toml`・運用 workflow は公開済み v0.4.0 の SHA と設定を維持します。次版の設定を旧 SHA と組み合わせると設定検証に失敗します。
+
+1. 次版の公開済み40桁 SHA を確定し、`uses:` と TOML の `action_ref` に同じ値を設定します。
+2. TOML を version 2 にし、`[ci]` と `[[ci.required_checks]]` を削除します。
+3. workflow の `workflow_run` トリガーと `actions: read`・`statuses: read` を削除します。PR 状態変更は同じ `pull_request_target` で直接観測されます。`mark` operation は廃止しています。
+4. workflow と設定を同時に反映し、Run workflow の `update-labels = true` で全 open PR を同期します。CI を含む旧ラベルの付与は open／closed PR から除去されます。他のラベルと旧ラベルのリポジトリ内の定義は削除しません。
+5. PR 更新で当該 PR が観測されること、CI 開始・完了では起動しないこと、JSON・Summary・参考 Check・ラベルに CI の実行状態が集約されないことを確認します。
+
+次版の観測・レポートは schema version 2 です。CI 状態と `mergeStateStatus` の項目を削除し、PR・レビューの鮮度を検証します。ラベル用の `label_assessment` と `review_stable` は PR の表示状態から独立させ、head・base・レビュー内容などの変化は引き続き検出します。参考 Check は引き続き常に neutral で、CI 成功やマージ許可を表しません。

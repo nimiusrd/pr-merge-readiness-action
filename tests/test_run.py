@@ -10,7 +10,7 @@ import pytest
 from pr_merge_readiness import runtime
 from pr_merge_readiness.cli import main
 from pr_merge_readiness.config import ACTION_REPOSITORY
-from tests.test_config import ROOT, config
+from tests.test_config import config, config_text
 from tests.test_support import BASE, HEAD
 
 
@@ -23,7 +23,7 @@ def context(tmp_path, monkeypatch):
     blob = {
         "type": "file",
         "encoding": "base64",
-        "content": base64.b64encode((ROOT / "examples/minimal.toml").read_bytes()).decode(),
+        "content": base64.b64encode(config_text().encode()).decode(),
     }
     env = {
         "GH_TOKEN": "read-only-token",
@@ -78,11 +78,9 @@ def test_invalid_proposal_never_falls_back_to_operational_config(context, event_
     [
         ("workflow_dispatch", {"inputs": {"pr-number": "12"}}, "observe"),
         ("workflow_dispatch", {"inputs": {"update-labels": True}}, "observe"),
-        ("pull_request_target", {"action": "opened"}, "mark"),
+        ("pull_request_target", {"action": "opened"}, "observe"),
         ("pull_request_target", {"action": "closed"}, "observe"),
         ("pull_request_target", {"action": "edited", "changes": {"title": {}}}, "skip"),
-        ("workflow_run", {"action": "in_progress", "workflow_run": {"name": "CI"}}, "mark"),
-        ("workflow_run", {"action": "completed", "workflow_run": {"name": "CI"}}, "observe"),
     ],
 )
 def test_run_prepares_the_actual_event_and_report_paths(context, event_name, event, expected):
@@ -105,9 +103,10 @@ def test_run_prepares_the_actual_event_and_report_paths(context, event_name, eve
         assert "artifact-name" not in values
 
 
-def test_unsupported_event_skips_without_fetching_configuration(context):
+@pytest.mark.parametrize("event_name", ["pull_request_review", "workflow_run"])
+def test_unsupported_event_skips_without_fetching_configuration(context, event_name):
     api, _, _, output = context
-    os.environ["GITHUB_EVENT_NAME"] = "pull_request_review"
+    os.environ["GITHUB_EVENT_NAME"] = event_name
     assert runtime.run_action() == 0
     api.request.assert_not_called()
     assert output.read_text() == "operation=skip\n"

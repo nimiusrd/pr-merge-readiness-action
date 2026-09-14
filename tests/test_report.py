@@ -7,9 +7,10 @@ from tests.test_support import HEAD, facts, policy
 
 def result(data):
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "mode": "shadow",
         "decision": "WAITING",
+        "label_assessment": {"decision": "SHADOW_CONDITIONS_MET", "conditions": []},
         "conditions": [{"name": "example", "status": "waiting", "detail": "reason"}],
         "observations": data,
         "policy": policy(),
@@ -57,3 +58,12 @@ def test_partial_failed_observation_renders_without_filling_missing_data():
     assert "INSUFFICIENT_DATA" in text
     assert "対象: <code>null</code>" in text
     assert "pr" not in value["observations"]
+
+
+def test_summary_distinguishes_pr_and_label_assessments():
+    text = markdown(result(facts()))
+    assert "判定: <code>&quot;WAITING&quot;</code>" in text
+    assert (
+        "ラベル用判定（レビュー・変更履歴のみ）: <code>&quot;SHADOW_CONDITIONS_MET&quot;</code>"
+        in text
+    )

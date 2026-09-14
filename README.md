@@ -1,12 +1,16 @@
 # PR Merge Readiness
 
-GitHub の PR・レビュー・CI・変更履歴を読み取り、マージ準備状況を判定する Composite Action です。任意のリポジトリの workflow から `uses:` で呼び出し、PR ごとの JSON と Job Summary を生成できます。参考 Check と手動ラベルの公開にも対応しています。
+GitHub の PR・レビュー・変更履歴を読み取り、レビュー条件の充足と必要な対応を判定する Composite Action です。任意のリポジトリの workflow から `uses:` で呼び出し、PR ごとの JSON と Job Summary を生成できます。参考 Check と手動ラベルの公開にも対応しています。
 
 対応環境は GitHub.com、Ubuntu、Python 3.14、Git です。Python は uv 0.12.13 で管理し、Action・CI・Dev Container で同じ minor を使用します。実行時の Python 依存パッケージはありません。
 
+CI の待機・成功・失敗・再実行履歴は GitHub Checks に任せます。この Action は CI の結果、commit status、`mergeStateStatus` を収集・判定・レポート化しません。CI 定義ファイルの変更は、変更内容に対するレビュー条件として扱います。
+
+> この文書と `examples/` は次版（未公開）の仕様です。設定は version 2、観測・レポートは schema version 2 です。公開済み v0.4.0 とは互換性がありません。リポジトリ内の `.github/` は公開済み版の運用設定を維持しており、[移行手順](docs/workflow.md#公開後の移行)に従って新しい実装 SHA と同時に切り替えます。
+
 ## クイックスタート
 
-1. [最小設定](examples/minimal.toml)を自分のリポジトリの `.github/pr-merge-readiness.toml` にコピーし、CI workflow 名と必須 Check の名前・発行元を合わせます。
+1. [最小設定](examples/minimal.toml)を自分のリポジトリの `.github/pr-merge-readiness.toml` にコピーし、承認数と変更履歴のレビュー条件を合わせます。
 2. 次の workflow を `.github/workflows/pr-merge-readiness.yml` として追加します。
 3. 設定と workflow を default branch に反映し、Actions の **Run workflow** から実行します。
 
@@ -35,26 +39,24 @@ jobs:
       queue: max
     permissions:
       contents: read
-      actions: read
-      statuses: read
       checks: write
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@21fa2df95fc615847ba7e1a24e9c77bd5d1323fb
+      - uses: nimiusrd/pr-merge-readiness-action@REPLACE_WITH_RELEASE_COMMIT_SHA
 ```
 
-`uses:` と設定の `action_ref` に同じ **40 桁 commit SHA** を指定します。この例は [v0.4.0 の実装コミット](https://github.com/nimiusrd/pr-merge-readiness-action/commit/21fa2df95fc615847ba7e1a24e9c77bd5d1323fb) に固定しています。入力 `action-ref` は実際の参照から取得するため、省略できます。
+`uses:` と設定の `action_ref` の `REPLACE_WITH_RELEASE_COMMIT_SHA` を、この仕様を含む公開済み Action の同じ **40 桁 commit SHA** に置き換えます。公開前のテンプレートをそのまま運用には使えません。入力 `action-ref` は実際の参照から取得するため、省略できます。
 
-既定の `operation: run` が、イベントと TOML の設定から設定検証・未観測表示・観測・Check・ラベル更新を選びます。呼び出し側は **1 job・1 step** で利用でき、`if`、`needs`、設定 SHA の受け渡し、artifact の upload/download を組み立てる必要はありません。Python の導入と実装の起動も Action 内で行い、利用側の checkout は不要です。
+既定の `operation: run` が、イベントと TOML の設定から設定検証・観測・Check・ラベル更新を選びます。呼び出し側は **1 job・1 step** で利用でき、`if`、`needs`、設定 SHA の受け渡し、artifact の upload/download を組み立てる必要はありません。Python の導入と実装の起動も Action 内で行い、利用側の checkout は不要です。
 
 PR 番号が空なら全 open PR、指定するとその PR を観測します。ラベル更新は `update-labels = true` を明示した場合だけ実行し、PR 番号指定との併用は拒否します。Check が有効なら、観測 → artifact 保存 → Check → ラベルの順に進み、保存や Check 公開の失敗後はラベルを更新しません。
 
-判定と観測の成否は別です。Action の成功は処理の成功であり、マージ条件の充足を意味しません。PR ごとの結果は Job Summary と artifact で確認してください。
+判定と観測の成否は別です。Action の成功は処理の成功であり、CI の成功やマージ条件全体の充足を意味しません。PR ごとの結果は Job Summary と artifact で確認してください。
 
-## CI・PR イベントも処理する
+## PR イベントも処理する
 
-[完全な workflow 例](examples/pr-merge-readiness.yml)には、CI 開始・完了、PR 状態変更、設定・workflow の変更を起動条件として含めています。`on.workflow_run.workflows` と TOML の `ci.workflows` を合わせてください。
+[完全な workflow 例](examples/pr-merge-readiness.yml)には、PR 状態変更と設定・workflow の変更を起動条件として含めています。PR 作成・追加 push・Draft 切替・base 変更・終了時は、その PR を直接観測して Check を更新します。CI 開始・完了では起動しません。
 
 `pull_request` は PR head、`push` は push 対象 SHA の設定を検証して終了します。運用イベントでは default branch の設定 SHA を一度確定し、最後まで同じ設定を使用します。公開直前にも head/base・状態を確認し、遅延結果で新しい表示を戻しません。
 
@@ -66,14 +68,11 @@ workflow を編集できる書き込み権限者は信頼対象です。GitHub �
 
 [イベント対応・更新・個別 operation の使い方](docs/workflow.md)も参照してください。再利用可能 workflow と workflow 生成器は提供しません。
 
-## 設定 version 1
+## 設定 version 2
 
 ```toml
-version = 1
-action_ref = "21fa2df95fc615847ba7e1a24e9c77bd5d1323fb" # v0.4.0
-
-[ci]
-workflows = ["CI"]
+version = 2
+action_ref = "REPLACE_WITH_RELEASE_COMMIT_SHA"
 
 [review]
 minimum_approvals = 0
@@ -84,23 +83,34 @@ stale_change_review_days = 30
 checks = true
 labels = "manual"
 
-[[ci.required_checks]]
-kind = "check_run"
-name = "test"
-app_id = 15368
 ```
 
-`ci.workflows` は CI 開始・完了イベントを選ぶ workflow の表示名です。`required_checks` は判定対象の job／Check 名です。Check Run は `kind = "check_run"` と `app_id`、commit status は `kind = "status"` と `creator` を指定します。空の必須 Check、重複、未知キー、不正型、非固定 SHA は拒否します。
+`ci` と `required_checks` は設定に含めません。未知キー、不正型、非固定 SHA は拒否します。version 1 の設定は受理しません。
 
 `review` の全項目は必須です。承認数は 0 以上、レビュー閾値は正の整数です。`publication` は省略でき、既定値は `checks = true`、`labels = "manual"`。ラベルのもう一つの値は `"off"` です。
 
-[複数 workflow の設定例](examples/multiple-workflows.toml)は、架空の Build・Quality・Security workflow と 7 個の Check を組み合わせています。
+[承認を必須にする設定例](examples/review-policy.toml)では、現在 head に対する承認を1件、変更履歴のレビュー閾値を14日に設定しています。
 
 この設定例では、変更された既存ファイルの base 上の最終変更から、観測時点で **30 日を超える**場合、現在 head に対する人間の承認を要求します。ちょうど 30 日では発動しません。承認者は User かつ OWNER／MEMBER／COLLABORATOR、レビューは現在 head の有効な APPROVED である必要があります。Bot、外部ユーザー、旧 head、dismiss されたレビューは解除条件になりません。追加ファイルは過去履歴を持たず、rename は旧パスの履歴を使います。
 
 履歴 API は 1 PR あたり最大 100 ファイル、run 全体で最大 100 要求です。失敗要求も消費し、同じ base SHA・パスは PR 間で cache を共有します。別 base、別 run に cache は引き継ぎません。上限超過・API 失敗・履歴不正は情報不足として扱います。
 
 ## 判定と表示
+
+判定対象は PR の open・Draft・競合状態、GitHub のレビュー要求、現在 head への承認、変更要求、未解決スレッド、変更履歴、CI 定義ファイルの変更です。CI 成功や base への追随を含む総合マージ可否は、GitHub の表示とルールで確認してください。
+
+ラベルはレビューと変更履歴の条件だけを表します。CI の実行状態と PR の open/closed・Draft・競合状態はラベルの判定に含めません。
+
+| 表示 | ラベルの条件 |
+| --- | --- |
+| `shadow/レビュー条件充足` | レビュー・変更履歴の条件を満たす |
+| `shadow/レビュー待ち` | 必要なレビュー承認を待つ |
+| `shadow/要対応` | 変更要求・未解決スレッド・古いファイルの変更に必要な承認・CI 定義の変更などに対応が必要 |
+| `shadow/再観測が必要` | レビュー対象やレビュー・変更履歴の情報が不足、または観測中／公開前にレビュー対象が変わった |
+
+たとえば Draft や競合があっても、レビュー条件を満たせばラベルは `shadow/レビュー条件充足` です。参考 Check・レポートでは引き続き PR 状態も判定します。観測中に Draft・競合・open/closed・更新時刻だけが変わってもラベルは再観測扱いにしません。head・base・レビュー要求・レビュー内容・未解決スレッドの変化は、ラベルでも再観測が必要です。
+
+手動同期時は open PR のラベルを更新し、closed／merged PR に残る管理ラベルを除去します。終了状態を表すラベルは付けません。次の手動同期で `shadow/CI・レビュー待ち` と `shadow/要マージ判断` の付与も取り除き、既存ラベルの説明を更新します。
 
 判定は `SHADOW_CONDITIONS_MET`、`WAITING`、`HUMAN_REVIEW_REQUIRED`、`INSUFFICIENT_DATA` の 4 種類です。Check の表示名は `Autonomous Merge Shadow / PR #番号`、conclusion は常に `neutral` です。マージや承認、branch protection の変更は行わず、必須 Check として登録する用途ではありません。
 
@@ -110,28 +120,27 @@ app_id = 15368
 
 | 入力 | 契約 |
 | --- | --- |
-| `operation` | 既定 `run`。個別に `prepare`／`validate-config`／`observe`／`mark`／`publish-checks`／`publish-labels` も指定可能 |
+| `operation` | 既定 `run`。個別に `prepare`／`validate-config`／`observe`／`publish-checks`／`publish-labels` も指定可能 |
 | `action-ref` | 省略時は実際の remote Action 参照を使用。40 桁 SHA が必須。明示入力も実ソースと照合。local Action は明示指定 |
 | `config-path` | 既定 `.github/pr-merge-readiness.toml` |
 | `repository` | workflow の repository と一致すること。既定 `github.repository` |
 | `token` | 必要な権限を持つ token。既定 `github.token` |
 | `config-sha` | 個別 operation 用。公開・`validate-config` では必須、`prepare` では禁止 |
 | `pr-number` | 個別の手動 `observe` 用の正整数 |
-| `event-path` | 個別 `observe`／`mark` 用。省略時 `GITHUB_EVENT_PATH` |
-| `report-dir`・`artifact-name` | 個別の観測・公開で必須。`mark` では禁止 |
+| `event-path` | 個別 `observe` 用。省略時 `GITHUB_EVENT_PATH` |
+| `report-dir`・`artifact-name` | 個別の観測・公開で必須 |
 
 `run` は `config-sha`・`pr-number`・`event-path`・`report-dir`・`artifact-name` の入力を受け取りません。手動入力は実イベントから取得し、設定 SHA と保存先を内部で決定します。観測レポートは runner の一時ディレクトリ内に保存し、同じ run ID・attempt の artifact として公開前にアップロードします。
 
-`run` の出力 `operation` は `validate-config`／`mark`／`observe`／`skip`。設定を読んだ場合は `config-sha`、運用準備ではさらに `checks`・`labels`・`pr-number`、観測を選んだ場合は `report-dir`・`manifest`・`artifact-name` を出力します。`checks` と `labels` は `"true"`／`"false"` の文字列で、設定と選択を表します。公開成功の保証や複数 PR の判定を集約した boolean ではありません。
+`run` の出力 `operation` は `validate-config`／`observe`／`skip`。設定を読んだ場合は `config-sha`、運用準備ではさらに `checks`・`labels`・`pr-number`、観測を選んだ場合は `report-dir`・`manifest`・`artifact-name` を出力します。`checks` と `labels` は `"true"`／`"false"` の文字列で、設定と選択を表します。公開成功の保証や複数 PR の判定を集約した boolean ではありません。
 
-既存の個別 operation は入出力と動作を維持します。`prepare` と `validate-config` は PR・イベント・レポート入力を受け取らず、`publish-*` は PR 番号・イベントパスを受け取りません。個別利用時は利用側が設定 SHA、artifact 保存、権限、公開順序を管理します。
+個別 operation でも同じ観測・公開処理を使います。`prepare` と `validate-config` は PR・イベント・レポート入力を受け取らず、`publish-*` は PR 番号・イベントパスを受け取りません。個別利用時は利用側が設定 SHA、artifact 保存、権限、公開順序を管理します。
 
 | operation | job の token 権限 |
 | --- | --- |
-| `run` | contents・actions・statuses の read、checks・pull-requests・issues の write |
+| `run` | contents の read、checks・pull-requests・issues の write |
 | `prepare`・`validate-config` | `contents: read` |
-| `observe` | contents・pull-requests・checks・statuses の read |
-| `mark` | contents・pull-requests・actions の read、checks の write |
+| `observe` | contents・pull-requests の read |
 | `publish-checks` | contents・pull-requests の read、checks の write |
 | `publish-labels` | contents の read、pull-requests・issues の write |
 
@@ -143,7 +152,7 @@ artifact 名は run ID と attempt ごとに分け、保持期間を 30 日に�
 
 同じ run の全 job 再実行では、前 attempt の artifact が取得できなくなる場合があります。[upload-artifact #585](https://github.com/actions/upload-artifact/issues/585) に、名前を attempt ごとに分けた場合も含む報告があります。再観測には新しい **Run workflow** を使い、再実行する場合は必要な artifact を先に Git 外へ保存してください。30日の保存設定は、GitHub 上で削除・再実行された artifact の再取得を保証しません。
 
-レポートは `format = "pr-merge-readiness/report"`、manifest は `format = "pr-merge-readiness/manifest"`、いずれも `schema_version = 1` です。レポートには観測、正規化 policy、policy の SHA-256 指紋、判定、conditions、出所を保存します。出所は評価器・設定の repository／SHA／path です。`provenance.workflow` は常に null です。manifest は repository、run ID、attempt、artifact 名、観測範囲、PR 別ファイル一覧、収集失敗状態、同じ出所を持ちます。公開前に一覧の全ファイルを検証します。
+レポートは `format = "pr-merge-readiness/report"`、manifest は `format = "pr-merge-readiness/manifest"`、観測・レポートは `schema_version = 2`、manifest は `schema_version = 1` です。レポートには観測、正規化 policy、policy の SHA-256 指紋、判定、conditions、ラベル用の `label_assessment`（decision と conditions）、出所を保存します。`observations.stable` は PR 状態を含む全体の鮮度、`observations.review_stable` はレビュー対象・レビュー・変更履歴の判定に使う情報の鮮度を表します。Summary にも全体とラベル用の判定を表示します。出所は評価器・設定の repository／SHA／path です。`provenance.workflow` は常に null です。manifest は repository、run ID、attempt、artifact 名、観測範囲、PR 別ファイル一覧、収集失敗状態、同じ出所を持ちます。公開前に一覧の全ファイルを検証します。
 
 新しい artifact を展開し、その Action SHA を含む、利用者が信頼したローカル Git リポジトリを指定します。
 
@@ -157,7 +166,7 @@ bash /absolute/path/to/pr-merge-readiness-action/run.sh replay \
 
 保存した出所と指定 SHA を照合し、`git archive` でその commit の評価器と依存モジュールを取り出します。保存情報だけで評価し、通信を禁止した隔離 Python プロセスで判定全体を比較します。現在時刻、現在 checkout、ネットワークは使いません。結果が同じなら `matches: true`、終了コード 0 です。
 
-旧 CLI、policy version 2、旧 JSON／artifact／評価器は非対応です。旧 artifact の変換、旧形式への fallback、旧 SHA との比較はありません。
+CI 条件を含む旧 policy、schema version 1 のレポートは非対応です。旧 artifact の変換や旧形式への fallback はありません。過去の記録を再評価する場合は、その記録と一致する信頼済みの旧版 CLI を別途使用してください。
 
 ## 開発
 

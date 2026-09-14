@@ -10,26 +10,24 @@ def policy():
         "stale_change_review_days": 30,
         "minimum_approvals": 0,
         "require_resolved_threads": True,
-        "required_checks": [{"kind": "check_run", "name": "Test", "app_id": 1}],
     }
 
 
 def facts():
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "observed_at": "2026-09-11T12:00:00+00:00",
         "repository": "example/project",
         "collection_errors": [],
         "stable": True,
+        "review_stable": True,
         "pr": {
             "number": 1,
             "state": "OPEN",
             "draft": False,
             "head_sha": HEAD,
             "base_sha": BASE,
-            "merge_sha": MERGE,
             "mergeable": "MERGEABLE",
-            "merge_state": "CLEAN",
             "review_decision": None,
         },
         "change": {
@@ -59,17 +57,5 @@ def facts():
         },
         "reviews": [],
         "unresolved_threads": 0,
-        "ci_history": [],
         "ci_definition_changes": [],
-        "checks": [
-            {
-                "kind": "check_run",
-                "name": "Test",
-                "app_id": 1,
-                "sha": HEAD,
-                "id": 1,
-                "status": "completed",
-                "conclusion": "success",
-            }
-        ],
     }

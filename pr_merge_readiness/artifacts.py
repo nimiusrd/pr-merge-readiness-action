@@ -3,10 +3,10 @@
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Any, Final, cast, get_args
 
 from .config import ACTION_REPOSITORY, positive, relative_path
-from .contracts import Assessment, EvaluationError, Policy, Provenance, sha
+from .contracts import Assessment, Decision, EvaluationError, Policy, Provenance, sha
 from .evaluate import validate_policy
 
 REPORT_FORMAT: Final = "pr-merge-readiness/report"
@@ -47,9 +47,16 @@ def validate_report(report: dict[str, Any]) -> Assessment:
     if (
         report.get("format") != REPORT_FORMAT
         or type(report.get("schema_version")) is not int
-        or report["schema_version"] != 1
+        or report["schema_version"] != 2
     ):
         raise EvaluationError("unsupported report format")
+    labels = report.get("label_assessment")
+    if (
+        not isinstance(labels, dict)
+        or labels.get("decision") not in get_args(Decision)
+        or not isinstance(labels.get("conditions"), list)
+    ):
+        raise EvaluationError("invalid label assessment")
     validate_policy(report["policy"])
     if fingerprint(report["policy"]) != report["policy_sha256"]:
         raise EvaluationError("policy fingerprint mismatch")

@@ -55,13 +55,18 @@ def test_wrong_run_attempt_repository_name_source_and_missing_report_fail():
 
 def test_old_schema_and_tampered_policy_are_rejected():
     with pytest.raises(ValueError):
-        validate_report({"schema_version": 2})
+        validate_report({"schema_version": 1})
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         save(root)
         report = json.loads((root / "pr-1.json").read_text())
         for mutate in (
             lambda r: r.update(schema_version=True),
+            lambda r: r.update(schema_version=1),
+            lambda r: r.pop("label_assessment"),
+            lambda r: r.update(label_assessment=None),
+            lambda r: r["label_assessment"].update(decision="INVALID"),
+            lambda r: r["label_assessment"].update(conditions=None),
             lambda r: r["policy"].update(stale_change_review_days=7),
             lambda r: r["provenance"]["evaluator"].update(repository="other/repo"),
             lambda r: r["provenance"].update(

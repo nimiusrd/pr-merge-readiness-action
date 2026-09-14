@@ -3,7 +3,7 @@
 import pytest
 from pr_merge_readiness.contracts import EvaluationError
 from pr_merge_readiness.evaluate import assess
-from tests.test_support import BASE, HEAD, MERGE, facts, policy
+from tests.test_support import BASE, HEAD, facts, policy
 
 
 def decision(data, config=None):
@@ -32,7 +32,7 @@ def test_size_path_and_test_names_do_not_change_decision(path):
 def test_small_change_does_not_override_failure():
     data = facts()
     data["change"].update(additions=1, deletions=0)
-    data["checks"][0]["conclusion"] = "failure"
+    data["unresolved_threads"] = 1
     assert decision(data) == "HUMAN_REVIEW_REQUIRED"
 
 
@@ -40,15 +40,12 @@ def test_changed_ci_definitions_require_human_review_despite_success():
     data = facts()
     data["ci_definition_changes"] = ["provider-defined/pipeline.yml"]
     assert decision(data) == "HUMAN_REVIEW_REQUIRED"
-    data["checks"][0].update(status="in_progress", conclusion=None)
-    assert decision(data) == "HUMAN_REVIEW_REQUIRED"
 
 
 def test_unknown_data_never_becomes_success():
     for key in [
         "pr",
         "change",
-        "checks",
         "ci_definition_changes",
         "reviews",
         "unresolved_threads",
@@ -78,15 +75,10 @@ def test_unknown_data_never_becomes_success():
 def test_pr_conditions():
     cases = [
         ({"draft": True}, "WAITING"),
-        ({"draft": True, "merge_state": "DRAFT"}, "WAITING"),
         ({"state": "CLOSED"}, "HUMAN_REVIEW_REQUIRED"),
         ({"state": "MERGED"}, "HUMAN_REVIEW_REQUIRED"),
         ({"mergeable": "CONFLICTING"}, "HUMAN_REVIEW_REQUIRED"),
         ({"mergeable": "UNKNOWN"}, "WAITING"),
-        ({"merge_state": "BEHIND"}, "WAITING"),
-        ({"merge_state": "UNKNOWN"}, "WAITING"),
-        ({"merge_state": "BLOCKED"}, "HUMAN_REVIEW_REQUIRED"),
-        ({"merge_state": "UNSTABLE"}, "HUMAN_REVIEW_REQUIRED"),
         ({"review_decision": "CHANGES_REQUESTED"}, "HUMAN_REVIEW_REQUIRED"),
         ({"review_decision": "REVIEW_REQUIRED"}, "WAITING"),
     ]
@@ -96,92 +88,10 @@ def test_pr_conditions():
         assert decision(data) == expected
 
 
-def test_aggregate_block_waits_for_explicit_pending_conditions():
-    data = facts()
-    data["pr"].update(merge_state="BLOCKED", review_decision="REVIEW_REQUIRED")
-    assert decision(data) == "WAITING"
-    data["pr"]["review_decision"] = "APPROVED"
-    assert decision(data) == "HUMAN_REVIEW_REQUIRED"
-    data["checks"][0].update(status="in_progress", conclusion=None)
-    assert decision(data) == "WAITING"
-    data["checks"][0].update(status="completed", conclusion="success")
-    assert decision(data) == "HUMAN_REVIEW_REQUIRED"
-    data["pr"]["merge_state"] = "CLEAN"
-    assert decision(data) == "SHADOW_CONDITIONS_MET"
-
-
-def test_explicit_failure_still_blocks_while_approval_is_pending():
-    data = facts()
-    data["pr"].update(merge_state="BLOCKED", review_decision="REVIEW_REQUIRED")
-    data["checks"][0]["conclusion"] = "failure"
-    assert decision(data) == "HUMAN_REVIEW_REQUIRED"
-    data["checks"][0]["conclusion"] = "success"
-    data["unresolved_threads"] = 1
-    assert decision(data) == "HUMAN_REVIEW_REQUIRED"
-
-
 def test_incomplete_pagination_overrides_other_results():
     data = facts()
     data["collection_errors"] = ["GraphQL pagination limit exceeded"]
-    data["pr"]["merge_state"] = "BLOCKED"
     assert decision(data) == "INSUFFICIENT_DATA"
-
-
-def test_missing_check_wrong_sha_or_producer_waits():
-    for change in [{"app_id": 2}, {"sha": "d" * 40}, {"name": "Other"}]:
-        data = facts()
-        data["checks"][0].update(change)
-        assert decision(data) == "WAITING"
-    data["checks"] = []
-    assert decision(data) == "WAITING"
-
-
-@pytest.mark.parametrize(
-    "conclusion",
-    ["failure", "cancelled", "timed_out", "skipped", "neutral", "action_required", None],
-)
-def test_non_success_conclusions_are_not_accepted(conclusion):
-    data = facts()
-    data["checks"][0]["conclusion"] = conclusion
-    assert decision(data) == "HUMAN_REVIEW_REQUIRED"
-
-
-def test_latest_rerun_supersedes_old_success_even_while_pending():
-    data = facts()
-    data["checks"].append(
-        {**data["checks"][0], "id": 2, "status": "in_progress", "conclusion": None}
-    )
-    assert decision(data) == "WAITING"
-    data["checks"][1].update(status="completed", conclusion="failure")
-    assert decision(data) == "HUMAN_REVIEW_REQUIRED"
-    data["checks"].append({**data["checks"][0], "id": 3})
-    assert decision(data) == "SHADOW_CONDITIONS_MET"
-
-
-def test_current_merge_failure_is_not_hidden_by_head_success():
-    data = facts()
-    data["checks"].append({**data["checks"][0], "id": 2, "sha": MERGE, "conclusion": "failure"})
-    assert decision(data) == "HUMAN_REVIEW_REQUIRED"
-    data["pr"]["merge_sha"] = "d" * 40
-    assert decision(data) == "SHADOW_CONDITIONS_MET"
-
-
-def test_status_check_requires_exact_creator():
-    config = policy()
-    config["required_checks"] = [{"kind": "status", "name": "External CI", "creator": "ci-service"}]
-    data = facts()
-    data["checks"] = [
-        {
-            **config["required_checks"][0],
-            "id": 2,
-            "sha": HEAD,
-            "status": "completed",
-            "conclusion": "success",
-        }
-    ]
-    assert decision(data, config) == "SHADOW_CONDITIONS_MET"
-    data["checks"][0]["creator"] = "someone-else"
-    assert decision(data, config) == "WAITING"
 
 
 def test_approvals_are_per_person_and_current_head():
@@ -304,10 +214,9 @@ def test_unresolved_threads_are_an_explicit_policy():
         {"minimum_approvals": True},
         {"require_resolved_threads": "false"},
         {"required_checks": [{"kind": "check_run", "name": "Test", "app_id": 0}]},
-        {"required_checks": policy()["required_checks"] * 2},
     ],
 )
-def test_required_checks_are_mandatory_and_policy_is_validated(change):
+def test_policy_rejects_ci_configuration_and_invalid_review_settings(change):
     with pytest.raises(EvaluationError):
         assess(facts(), {**policy(), **change})
 
@@ -317,3 +226,57 @@ def test_policy_fingerprint_is_stable_and_sensitive_to_configuration():
     first = assess(facts(), config)["policy_sha256"]
     assert first == assess(facts(), dict(reversed(list(config.items()))))["policy_sha256"]
     assert first != assess(facts(), {**config, "minimum_approvals": 1})["policy_sha256"]
+
+
+@pytest.mark.parametrize(
+    "update,expected",
+    [
+        ({"draft": True}, "WAITING"),
+        ({"state": "CLOSED"}, "HUMAN_REVIEW_REQUIRED"),
+        ({"state": "MERGED"}, "HUMAN_REVIEW_REQUIRED"),
+        ({"mergeable": "CONFLICTING"}, "HUMAN_REVIEW_REQUIRED"),
+        ({"mergeable": "UNKNOWN"}, "WAITING"),
+        ({"draft": None}, "INSUFFICIENT_DATA"),
+        ({"state": None}, "INSUFFICIENT_DATA"),
+        ({"mergeable": None}, "INSUFFICIENT_DATA"),
+    ],
+)
+def test_pr_state_affects_reference_assessment_only(update, expected):
+    data = facts()
+    data["pr"].update(update)
+    result = assess(data, policy())
+    assert result["decision"] == expected
+    assert result["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
+    assert not {"open_pr", "ready_for_review", "mergeable", "freshness"} & {
+        condition["name"] for condition in result["label_assessment"]["conditions"]
+    }
+    data["pr"]["review_decision"] = "CHANGES_REQUESTED"
+    assert assess(data, policy())["label_assessment"]["decision"] == "HUMAN_REVIEW_REQUIRED"
+
+
+@pytest.mark.parametrize(
+    "change,settings,expected",
+    [
+        ({}, {"minimum_approvals": 1}, "WAITING"),
+        ({"unresolved_threads": 1}, {}, "HUMAN_REVIEW_REQUIRED"),
+        ({"ci_definition_changes": [".github/workflows/ci.yml"]}, {}, "HUMAN_REVIEW_REQUIRED"),
+        ({}, {"stale_change_review_days": 1}, "HUMAN_REVIEW_REQUIRED"),
+        ({"collection_errors": ["API 403"]}, {}, "INSUFFICIENT_DATA"),
+        ({"review_stable": False}, {}, "INSUFFICIENT_DATA"),
+        ({"review_stable": None}, {}, "INSUFFICIENT_DATA"),
+    ],
+)
+def test_label_assessment_preserves_review_history_and_data_requirements(
+    change, settings, expected
+):
+    data = facts()
+    data.update(change)
+    data["pr"].update(draft=True, mergeable="CONFLICTING")
+    assert assess(data, {**policy(), **settings})["label_assessment"]["decision"] == expected
+
+
+@pytest.mark.parametrize("missing", ["review_stable", "pr", "reviews", "change_history", "files"])
+def test_missing_review_inputs_never_produce_a_ready_label(missing):
+    data = facts()
+    del data[missing]
+    assert assess(data, policy())["label_assessment"]["decision"] == "INSUFFICIENT_DATA"

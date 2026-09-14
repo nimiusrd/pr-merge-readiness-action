@@ -14,23 +14,16 @@ from pr_merge_readiness.config import ACTION_REPOSITORY
 from pr_merge_readiness.observe import observe
 from pr_merge_readiness.publish import PublishError
 from tests.test_collect import FixtureAPI
-from tests.test_config import ROOT, config
+from tests.test_config import ROOT, config, config_text
 from tests.test_support import BASE, HEAD, policy
 
 
 def test_routes_and_manual_input_conflicts():
     value = config()
-    for action, expected in (
-        ("in_progress", "mark"),
-        ("completed", "observe"),
-        ("requested", "skip"),
-    ):
-        event = {"action": action, "workflow_run": {"name": value["ci"]["workflows"][0]}}
-        assert runtime.route("workflow_run", event, value, "", False) == expected
-        event["workflow_run"]["name"] = "Unrelated CI"
-        assert runtime.route("workflow_run", event, value, "", False) == "skip"
     for action in ("opened", "reopened", "synchronize", "ready_for_review", "converted_to_draft"):
-        assert runtime.route("pull_request_target", {"action": action}, value, "", False) == "mark"
+        assert (
+            runtime.route("pull_request_target", {"action": action}, value, "", False) == "observe"
+        )
     assert runtime.route("pull_request_target", {"action": "closed"}, value, "", False) == "observe"
     for changed in ("title", "body"):
         assert (
@@ -47,9 +40,9 @@ def test_routes_and_manual_input_conflicts():
         runtime.route(
             "pull_request_target", {"action": "edited", "changes": {"base": {}}}, value, "", False
         )
-        == "mark"
+        == "observe"
     )
-    for event in ("pull_request_review", "schedule"):
+    for event in ("workflow_run", "pull_request_review", "schedule"):
         assert runtime.route(event, {}, value, "", False) == "skip"
     for event, number, labels in (
         ("push", "1", False),
@@ -67,7 +60,7 @@ def test_routes_and_manual_input_conflicts():
 
 
 def test_default_branch_resolved_once_and_pinned_for_later_jobs():
-    text = (ROOT / "examples/minimal.toml").read_bytes()
+    text = config_text().encode()
     action_ref = config()["action_ref"]
     api = Mock(prefix="/repos/example/project")
     api.request.side_effect = [
@@ -163,7 +156,6 @@ def test_publication_validates_all_reports_before_first_write_and_continues_afte
         manifest["reports"].append("pr-2.json")
         write_json(root / "manifest.json", manifest)
         value = config()
-        value["ci"]["required_checks"] = policy()["required_checks"]
         env = {
             "PMR_OPERATION": "publish-checks",
             "PMR_ACTION_REF": HEAD,
@@ -202,7 +194,6 @@ def test_labels_require_explicit_all_open_manual_observation():
         observe(FixtureAPI(), policy(), {}, 1, root, source, "42", "1", "pr-merge-readiness-42-1")
         event = root / "event.json"
         value = config()
-        value["ci"]["required_checks"] = policy()["required_checks"]
         env = {
             "PMR_OPERATION": "publish-labels",
             "PMR_ACTION_REF": HEAD,

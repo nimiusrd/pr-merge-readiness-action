@@ -190,9 +190,7 @@ def test_new_head_and_dismissal_require_a_new_approval():
 
 def test_human_approval_does_not_override_other_conditions():
     for mutation, expected in [
-        (lambda d: d["checks"][0].update(conclusion="failure"), "HUMAN_REVIEW_REQUIRED"),
         (lambda d: d.update(unresolved_threads=1), "HUMAN_REVIEW_REQUIRED"),
-        (lambda d: d.update(checks=[]), "WAITING"),
         (lambda d: d.update(stable=False), "INSUFFICIENT_DATA"),
     ]:
         data = history_facts()

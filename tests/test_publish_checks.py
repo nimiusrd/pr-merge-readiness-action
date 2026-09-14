@@ -8,7 +8,6 @@ from pr_merge_readiness.publish import PublishError
 from pr_merge_readiness.publish_checks import (
     CHECK_PREFIX,
     managed_checks,
-    mark_event,
     publish_report,
 )
 from tests.test_support import BASE, HEAD, MERGE, facts, policy
@@ -46,14 +45,6 @@ class FixtureAPI:
         }
         self.checks = []
         self.writes = []
-        self.run = {
-            "id": 5,
-            "status": "in_progress",
-            "run_attempt": 2,
-            "run_started_at": LATER,
-            "event": "pull_request",
-            "head_sha": MERGE,
-        }
         self.drift = None
         self.reads = 0
         self.failure = None
@@ -81,8 +72,6 @@ class FixtureAPI:
             if self.drift and self.reads == 2:
                 pr.update(self.drift)
             return deepcopy(pr)
-        if "/actions/runs/" in path:
-            return deepcopy(self.run)
         if "/commits/" in path:
             head = path.split("/commits/")[1].split("/")[0]
             records = [r for r in self.checks if r["head_sha"] == head]
@@ -108,39 +97,9 @@ def test_four_decisions_are_neutral_and_link_to_exact_artifact(decision):
     assert value == original
 
 
-def test_older_reports_and_late_markers_do_not_replace_newer_observation():
+def test_older_reports_do_not_replace_newer_observation():
     api = FixtureAPI()
     publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
-    publish_report(api, 1, report(), URL, ARTIFACT)
-    mark_event(api, {"pull_request": deepcopy(api.prs[1]), "action": "synchronize"}, URL)
-    assert len(api.writes) == 1
-    assert "SHADOW_CONDITIONS_MET" in api.checks[0]["output"]["title"]
-
-
-def test_marker_then_observation_updates_same_check():
-    api = FixtureAPI()
-    mark_event(api, {"pull_request": deepcopy(api.prs[1]), "action": "opened"}, URL)
-    assert "未観測" in api.checks[0]["output"]["title"]
-    publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
-    assert len(api.checks) == 1
-    assert api.writes[-1][2] == "PATCH"
-
-
-def test_title_edit_does_not_let_delayed_marker_erase_newer_observation():
-    api = FixtureAPI()
-    payload = deepcopy(api.prs[1])
-    publish_report(api, 1, report(at=LATER), URL, ARTIFACT)
-    api.prs[1]["updated_at"] = "2026-09-11T14:00:00+00:00"
-    mark_event(
-        api,
-        {
-            "pull_request": deepcopy(api.prs[1]),
-            "action": "edited",
-            "changes": {"title": {"from": "old"}},
-        },
-        URL,
-    )
-    mark_event(api, {"pull_request": payload, "action": "synchronize"}, URL)
     publish_report(api, 1, report(), URL, ARTIFACT)
     assert len(api.writes) == 1
     assert "SHADOW_CONDITIONS_MET" in api.checks[0]["output"]["title"]
@@ -240,48 +199,6 @@ def test_review_text_is_escaped():
     summary = api.writes[0][1]["output"]["summary"]
     assert "<script>" not in summary
     assert "&lt;script&gt;" in summary
-
-
-def test_old_head_event_and_title_only_edit_are_ignored():
-    api = FixtureAPI()
-    payload = deepcopy(api.prs[1])
-    api.prs[1]["head"]["sha"] = "d" * 40
-    assert mark_event(api, {"pull_request": payload, "action": "synchronize"}, URL) == []
-    assert (
-        mark_event(
-            api,
-            {"pull_request": api.prs[1], "action": "edited", "changes": {"title": {"from": "old"}}},
-            URL,
-        )
-        == []
-    )
-    assert not api.writes
-
-
-@pytest.mark.parametrize(
-    "event,head,count",
-    (
-        ("pull_request", MERGE, 2),
-        ("pull_request", HEAD, 2),
-        ("push", BASE, 2),
-        ("pull_request", "e" * 40, 0),
-    ),
-)
-def test_ci_start_targets_current_head_merge_or_push_base_only(event, head, count):
-    api = FixtureAPI()
-    api.run.update(event=event, head_sha=head)
-    results = mark_event(api, {"workflow_run": deepcopy(api.run)}, URL)
-    assert len(results) == count
-    assert all((c["conclusion"] == "neutral" for c in api.checks))
-
-
-@pytest.mark.parametrize("change", ({"status": "completed"}, {"run_attempt": 3}))
-def test_completed_ci_and_old_attempt_start_do_not_erase_results(change):
-    api = FixtureAPI()
-    payload = deepcopy(api.run)
-    api.run.update(change)
-    assert mark_event(api, {"workflow_run": payload}, URL) == []
-    assert not api.writes
 
 
 def test_check_pagination_cannot_return_truncated_success():
