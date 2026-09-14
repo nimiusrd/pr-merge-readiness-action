@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -32,6 +33,8 @@ MAX_PAGES = 30
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_HISTORY_FILES = 100
 MAX_HISTORY_REQUESTS = 100
+MERGEABILITY_RETRIES = 5
+MERGEABILITY_RETRY_SECONDS = 2
 PR_FIELDS = """
 number state isDraft headRefOid baseRefOid baseRefName updatedAt
 mergeable reviewDecision
@@ -155,6 +158,18 @@ def normalized_pr(raw: dict[str, Any]) -> PullRequest:
         "deletions": raw["deletions"],
         "changed_files": raw["changedFiles"],
     }
+
+
+def read_pr(api: GitHub, number: int) -> PullRequest:
+    """open PRの競合判定が計算中なら、上限付きで確定を待つ。"""
+    pr = normalized_pr(api.graphql(number, PR_FIELDS))
+    for _ in range(MERGEABILITY_RETRIES):
+        if pr["state"] != "OPEN" or pr["mergeable"] != "UNKNOWN":
+            break
+        time.sleep(MERGEABILITY_RETRY_SECONDS)
+        # 判定値だけでなくhead・base等も読み直し、古い対象へ結果を流用しない。
+        pr = normalized_pr(api.graphql(number, PR_FIELDS))
+    return pr
 
 
 def decision_metadata(
@@ -301,7 +316,7 @@ def collect(
         "observation_changes": None,
     }
     try:
-        before = normalized_pr(api.graphql(number, PR_FIELDS))
+        before = read_pr(api, number)
         facts["pr"] = before
         # RESTの旧pathも使い、workflowディレクトリ外へのrenameを取りこぼさない。
         # 同梱されるpatchやsource URLは参照・保存しない。
@@ -363,7 +378,7 @@ def collect(
             api,
             number,
         )
-        after = normalized_pr(api.graphql(number, PR_FIELDS))
+        after = read_pr(api, number)
         facts["rechecked"] = {
             "pr": before == after,
             "reviews": initial_metadata["reviews"] == confirmed_metadata["reviews"],

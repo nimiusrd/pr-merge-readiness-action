@@ -6,7 +6,14 @@ import json
 from copy import deepcopy
 from unittest.mock import patch
 from urllib.error import HTTPError
-from pr_merge_readiness.collect import CollectionError, GitHub, collect, targets
+from pr_merge_readiness.collect import (
+    MERGEABILITY_RETRIES,
+    MERGEABILITY_RETRY_SECONDS,
+    CollectionError,
+    GitHub,
+    collect,
+    targets,
+)
 from pr_merge_readiness.evaluate import assess
 from pr_merge_readiness.report import markdown
 from tests.test_support import BASE, HEAD, MERGE, policy
@@ -425,7 +432,8 @@ def test_ci_aggregate_changes_are_neither_requested_nor_recorded(state):
         {"isDraft": True, "updatedAt": "2026-09-11T12:01:00Z", "mergeable": "UNKNOWN"},
     ],
 )
-def test_pr_state_drift_does_not_invalidate_review_observation(drift):
+def test_pr_state_drift_does_not_invalidate_review_observation(drift, monkeypatch):
+    monkeypatch.setattr("pr_merge_readiness.collect.time.sleep", lambda _: None)
     api = FixtureAPI()
     api.drift = drift
     facts = collect(api, 1)
@@ -453,3 +461,75 @@ def test_review_target_drift_invalidates_label_assessment(drift):
     facts = collect(api, 1)
     assert not facts["review_stable"]
     assert assess(facts, policy())["label_assessment"]["decision"] == "INSUFFICIENT_DATA"
+
+
+@pytest.mark.parametrize(
+    "mergeable,expected",
+    [("MERGEABLE", "SHADOW_CONDITIONS_MET"), ("CONFLICTING", "HUMAN_REVIEW_REQUIRED")],
+)
+def test_initial_unknown_waits_for_mergeability_before_observing(mergeable, expected):
+    api = FixtureAPI()
+    api.state["mergeable"] = "UNKNOWN"
+    pending = deepcopy(api.state)
+    settled = {**pending, "mergeable": mergeable}
+    with (
+        patch.object(api, "graphql", side_effect=[pending, pending, settled, settled]),
+        patch("pr_merge_readiness.collect.time.sleep") as sleep,
+    ):
+        result = assess(collect(api, 1), policy())
+    assert sleep.call_count == 2
+    assert result["decision"] == expected
+    assert result["observations"]["pr"]["mergeable"] == mergeable
+    assert result["observations"]["stable"]
+    assert result["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
+
+
+@pytest.mark.parametrize("head", [HEAD, "d" * 40])
+def test_final_unknown_rechecks_the_whole_pr_and_keeps_head_drift(head):
+    api = FixtureAPI()
+    before = deepcopy(api.state)
+    pending = {**before, "mergeable": "UNKNOWN"}
+    settled = {**before, "headRefOid": head}
+    with (
+        patch.object(api, "graphql", side_effect=[before, pending, settled]),
+        patch("pr_merge_readiness.collect.time.sleep") as sleep,
+    ):
+        result = assess(collect(api, 1), policy())
+    sleep.assert_called_once_with(MERGEABILITY_RETRY_SECONDS)
+    assert result["decision"] == ("SHADOW_CONDITIONS_MET" if head == HEAD else "INSUFFICIENT_DATA")
+    assert result["label_assessment"]["decision"] == result["decision"]
+
+
+def test_persistent_unknown_has_bounded_retries_and_never_becomes_ready():
+    api = FixtureAPI()
+    api.state["mergeable"] = "UNKNOWN"
+    with patch("pr_merge_readiness.collect.time.sleep") as sleep:
+        result = assess(collect(api, 1), policy())
+    assert api.reads == 2 * (1 + MERGEABILITY_RETRIES)
+    assert sleep.call_count == 2 * MERGEABILITY_RETRIES
+    assert result["decision"] == "WAITING"
+    assert result["observations"]["pr"]["mergeable"] == "UNKNOWN"
+    assert result["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
+
+
+@pytest.mark.parametrize("state", ["CLOSED", "MERGED"])
+def test_ended_pr_does_not_wait_for_mergeability(state):
+    api = FixtureAPI()
+    api.state.update(state=state, mergeable="UNKNOWN")
+    with patch("pr_merge_readiness.collect.time.sleep") as sleep:
+        result = assess(collect(api, 1), policy())
+    sleep.assert_not_called()
+    assert api.reads == 2
+    assert result["decision"] == "HUMAN_REVIEW_REQUIRED"
+
+
+def test_api_failure_during_mergeability_retry_remains_collection_failure():
+    api = FixtureAPI()
+    api.state["mergeable"] = "UNKNOWN"
+    with (
+        patch.object(api, "graphql", side_effect=[api.state, CollectionError("API 403")]),
+        patch("pr_merge_readiness.collect.time.sleep"),
+    ):
+        result = assess(collect(api, 1), policy())
+    assert result["decision"] == "INSUFFICIENT_DATA"
+    assert result["observations"]["collection_errors"] == ["API 403"]

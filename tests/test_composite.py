@@ -299,3 +299,20 @@ def test_manual_labels_only_reflect_reviews_while_check_keeps_pr_state(
     assert report["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
     assert expected in checks.writes[-1][1]["output"]["title"]
     assert labels.names() == [DECISION_LABELS["SHADOW_CONDITIONS_MET"]]
+
+
+def test_pr_event_waits_for_mergeability_before_publishing_check(environment):
+    directory, event, reader, checks, labels, _ = environment
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request_target"
+    event.write_text(json.dumps({"action": "opened", "pull_request": {"number": 1}}))
+    reader.state["mergeable"] = "UNKNOWN"
+    reader.drift = {"mergeable": "MERGEABLE"}
+    with patch("pr_merge_readiness.collect.time.sleep") as sleep:
+        action = Composite(directory)
+        assert action.run() == 0
+    sleep.assert_called_once()
+    report = json.loads(action.artifacts["pr-merge-readiness-42-2"]["pr-1.json"])
+    assert report["decision"] == "SHADOW_CONDITIONS_MET"
+    assert report["observations"]["pr"]["mergeable"] == "MERGEABLE"
+    assert "SHADOW_CONDITIONS_MET" in checks.writes[-1][1]["output"]["title"]
+    assert not labels.calls
