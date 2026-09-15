@@ -66,6 +66,8 @@ Action 更新時は TOML の `action_ref` と workflow の `uses:` を同じ公�
 
 Action SHA を更新する PR では、PR head の TOML 検証後、default branch に残る旧 `action_ref` と新しい実行 SHA の照合が `config/action SHA mismatch` で失敗します。この段階では観測・Check 公開へ進みません。移行 PR は通常の必須 CI とレビューで検証し、マージ後に default branch の Run workflow で観測・参考 Check を確認してください。参考用の readiness job を必須 Check として登録しないでください。
 
+移行前に作成した既存 PR も、PR head の TOML が旧 `action_ref` のままなら新しい Action の検証に失敗します。default branch を取り込み、workflow と TOML を新しい SHA に揃えてから自動観測を再実行してください。それまでの観測には default branch の Run workflow を使用できます。
+
 同じ Check・ラベルを更新する既存 writer から切り替える場合は、実行終了を確認してから入口を一つの変更で切り替えます。切り戻しは workflow と TOML を同時に revert します。旧 artifact の変換は行いません。
 
 ## 公開後の移行
