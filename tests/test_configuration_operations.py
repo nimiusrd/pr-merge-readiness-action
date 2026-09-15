@@ -11,7 +11,7 @@ from pr_merge_readiness import runtime
 from pr_merge_readiness.cli import main
 from pr_merge_readiness.config import ACTION_REPOSITORY
 from tests.test_config import config, config_text
-from tests.test_support import BASE
+from tests.test_support import BASE, pr_event
 
 
 def blob(text):
@@ -50,11 +50,11 @@ def context(tmp_path, monkeypatch):
         ("workflow_dispatch", {"inputs": {"pr-number": "12"}}, True, ("observe", "12", "false")),
         ("workflow_dispatch", {"inputs": {"update-labels": "true"}}, True, ("observe", "", "true")),
         ("workflow_dispatch", {"inputs": {"update-labels": True}}, False, ("observe", "", "true")),
-        ("pull_request_target", {"action": "opened"}, True, ("observe", "", "false")),
-        ("pull_request_target", {"action": "opened"}, False, ("observe", "", "false")),
+        ("pull_request", pr_event(), True, ("observe", "", "false")),
+        ("pull_request", pr_event(), False, ("observe", "", "false")),
         (
-            "pull_request_target",
-            {"action": "edited", "changes": {"title": {}}},
+            "pull_request",
+            {**pr_event("edited"), "changes": {"title": {}}},
             True,
             ("skip", "", "false"),
         ),

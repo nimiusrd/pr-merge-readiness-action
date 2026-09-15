@@ -46,6 +46,10 @@ class CollectionError(ValueError):
     """API失敗・打ち切りは情報不足として記録する。"""
 
 
+class ProposalHeadChanged(CollectionError):
+    """未検証のheadへ観測対象が変わったため、PRの判定・公開を中止する。"""
+
+
 class GitHub:
     def __init__(self, repository: str):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
@@ -305,6 +309,7 @@ def collect(
     number: int,
     *,
     history_collector: ChangeHistoryCollector | None = None,
+    expected_head: str | None = None,
 ) -> Observations:
     facts: Observations = {
         "schema_version": 2,
@@ -317,6 +322,8 @@ def collect(
     }
     try:
         before = read_pr(api, number)
+        if expected_head is not None and before["head_sha"] != expected_head:
+            raise ProposalHeadChanged("PR head differs from validated proposal before observation")
         facts["pr"] = before
         # RESTの旧pathも使い、workflowディレクトリ外へのrenameを取りこぼさない。
         # 同梱されるpatchやsource URLは参照・保存しない。
@@ -379,6 +386,10 @@ def collect(
             number,
         )
         after = read_pr(api, number)
+        if expected_head is not None and after["head_sha"] != expected_head:
+            raise ProposalHeadChanged(
+                "PR head changed after proposal validation during observation"
+            )
         facts["rechecked"] = {
             "pr": before == after,
             "reviews": initial_metadata["reviews"] == confirmed_metadata["reviews"],
@@ -407,6 +418,8 @@ def collect(
             {"pr": after, **confirmed_metadata},
         )
         facts["observed_at"] = datetime.now(timezone.utc).isoformat()
+    except ProposalHeadChanged:
+        raise
     except (CollectionError, KeyError, TypeError, ValueError) as error:
         facts["collection_errors"].append(str(error))
     return facts

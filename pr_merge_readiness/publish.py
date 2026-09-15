@@ -142,10 +142,20 @@ def ensure_labels(api: GitHub) -> None:
             )
 
 
+def is_publication_target(pr: dict[str, Any]) -> bool:
+    """同一リポジトリからのPRを対象とし、DependabotのPRを除外する。"""
+    head_repository = pr["head"].get("repo")
+    return (
+        head_repository is not None
+        and head_repository["id"] == pr["base"]["repo"]["id"]
+        and pr["user"]["login"] != "dependabot[bot]"
+    )
+
+
 def desired_label(
     report: Assessment, current: dict[str, Any], repository: str, number: int
 ) -> str | None:
-    """レビュー対象の変化は情報不足。closedは管理ラベルの清掃対象にする。"""
+    """fork・Dependabot以外のopen PRへ付与し、対象外のPRは管理ラベルを清掃する。"""
     assessment = report.get("label_assessment")
     if not isinstance(assessment, dict):
         raise PublishError("missing label assessment")
@@ -159,6 +169,8 @@ def desired_label(
     if observed.get("number", number) != number:
         raise PublishError("report PR mismatch")
     if current["state"] == "closed":
+        return None
+    if not is_publication_target(current):
         return None
     expected = {
         "head_sha": current["head"]["sha"],

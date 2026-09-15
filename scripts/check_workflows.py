@@ -26,6 +26,9 @@ def check_action_flow(action: dict[str, Any]) -> None:
     for name in ("execute", "checks", "labels"):
         assert steps[name]["env"]["PMR_CONFIG_SHA"] == "${{ steps.run.outputs.config-sha }}"
         assert steps[name]["env"]["PMR_REPORT_DIR"] == "${{ steps.run.outputs.report-dir }}"
+    assert steps["run"]["env"]["PMR_VALIDATED_HEAD"] == ""
+    for name in ("execute", "checks"):
+        assert steps[name]["env"]["PMR_VALIDATED_HEAD"] == "${{ steps.run.outputs.validated-head }}"
     assert "steps.run.outcome == 'failure'" in steps["preparation"]["if"]
     assert "always()" in steps["observations"]["if"]
     assert "steps.execute.outcome == 'failure'" in steps["observations"]["if"]
@@ -84,10 +87,20 @@ def main() -> None:
     example = load(ROOT / "examples/pr-merge-readiness.yml")
     check_runtime(example, minimal["action_ref"])
     assert set(example["on"]) == {
-        "pull_request_target",
         "workflow_dispatch",
         "pull_request",
         "push",
+    }
+    assert example["on"]["pull_request"] == {
+        "types": [
+            "opened",
+            "reopened",
+            "synchronize",
+            "edited",
+            "ready_for_review",
+            "converted_to_draft",
+            "closed",
+        ]
     }
     snippets = re.findall(r"```yaml\n(.*?)\n```", (ROOT / "README.md").read_text(), re.DOTALL)
     assert len(snippets) == 1
@@ -104,7 +117,7 @@ def main() -> None:
             )
             assert own["action_ref"] == minimal["action_ref"]
             check_runtime(workflow, own["action_ref"])
-            assert workflow == example
+            # 運用中のworkflowは公開済みSHAを使う。新しい起動条件は公開後に移行する。
     steps = list(action["runs"]["steps"])
     for workflow in workflows:
         assert "on" in workflow and "jobs" in workflow

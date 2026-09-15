@@ -33,8 +33,9 @@ class FixtureAPI:
         self.prs = {
             n: {
                 "number": n,
-                "head": {"sha": HEAD},
-                "base": {"sha": BASE, "ref": "main"},
+                "head": {"sha": HEAD, "repo": {"id": 1}},
+                "base": {"sha": BASE, "ref": "main", "repo": {"id": 1}},
+                "user": {"login": "contributor", "type": "User"},
                 "state": "open",
                 "draft": False,
                 "updated_at": AT,
@@ -119,7 +120,7 @@ def test_new_head_never_inherits_old_conditions_met():
 @pytest.mark.parametrize(
     "change",
     (
-        {"base": {"sha": "d" * 40, "ref": "other"}},
+        {"base": {"sha": "d" * 40, "ref": "other", "repo": {"id": 1}}},
         {"draft": True},
         {"updated_at": LATER},
         {"state": "closed"},
@@ -185,9 +186,31 @@ def test_invalid_identity_and_read_failures_never_write():
 
 def test_last_moment_pr_change_never_writes():
     api = FixtureAPI()
-    api.drift = {"head": {"sha": "d" * 40}}
+    api.drift = {"head": {"sha": "d" * 40, "repo": {"id": 1}}}
     with pytest.raises(PublishError, match="changed before"):
         publish_report(api, 1, report(), URL, ARTIFACT)
+    assert not api.writes
+
+
+@pytest.mark.parametrize("excluded", ["fork", "dependabot", "deleted-source"])
+def test_excluded_pr_keeps_existing_check_without_writes(excluded):
+    api = FixtureAPI()
+    publish_report(api, 1, report(), URL, ARTIFACT)
+    existing = deepcopy(api.checks)
+    api.writes.clear()
+    if excluded == "dependabot":
+        api.prs[1]["user"]["login"] = "dependabot[bot]"
+    else:
+        api.prs[1]["head"]["repo"] = {"id": 2} if excluded == "fork" else None
+    assert publish_report(api, 1, report(at=LATER), URL, ARTIFACT) == "skipped"
+    assert not api.writes
+    assert api.checks == existing
+
+
+def test_source_deleted_before_final_confirmation_skips_check_publication():
+    api = FixtureAPI()
+    api.drift = {"head": {"sha": HEAD, "repo": None}}
+    assert publish_report(api, 1, report(), URL, ARTIFACT) == "skipped"
     assert not api.writes
 
 

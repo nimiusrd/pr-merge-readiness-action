@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from .contracts import Assessment
 
-from .publish import DECISION_LABELS, GitHub, MAX_PAGES, PublishError
+from .publish import DECISION_LABELS, GitHub, MAX_PAGES, PublishError, is_publication_target
 
 CHECK_PREFIX = "Autonomous Merge Shadow / PR #"
 EXTERNAL_PREFIX = "pr-merge-readiness-v1"
@@ -108,7 +108,10 @@ def write_check(
     else:
         latest = None
     # 一覧取得後にもPRを確認し、head/base更新との競合で誤った結果を書かない。
-    confirmed = snapshot(api.request(f"{api.prefix}/pulls/{number}"))
+    confirmed_pr = api.request(f"{api.prefix}/pulls/{number}")
+    if not is_publication_target(confirmed_pr):
+        return "skipped"
+    confirmed = snapshot(confirmed_pr)
     if current != confirmed:
         raise PublishError("PR changed before Check publication; recollect")
     body = {
@@ -140,7 +143,13 @@ def heading(current: dict[str, Any], run_url: str) -> str:
 
 
 def publish_report(
-    api: GitHub, number: int, report: Assessment, run_url: str, artifact: str
+    api: GitHub,
+    number: int,
+    report: Assessment,
+    run_url: str,
+    artifact: str,
+    *,
+    expected_head: str | None = None,
 ) -> str:
     decision = report["decision"]
     facts = report["observations"]
@@ -151,7 +160,12 @@ def publish_report(
         raise PublishError("report PR mismatch")
     at = facts["observed_at"]
     timestamp(at)
-    current = snapshot(api.request(f"{api.prefix}/pulls/{number}"))
+    pr = api.request(f"{api.prefix}/pulls/{number}")
+    if not is_publication_target(pr):
+        return "skipped"
+    if expected_head is not None and pr["head"]["sha"] != expected_head:
+        return "skipped"
+    current = snapshot(pr)
     agrees = all(observed.get(key) == value for key, value in current.items())
     old_head = bool(observed.get("head_sha") and observed["head_sha"] != current["head_sha"])
     if old_head:

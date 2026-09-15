@@ -68,6 +68,7 @@ runs:
         PMR_SOURCE_REF: ${{ github.action_ref }}
         PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
         PMR_OPERATION: ${{ inputs.operation }}
+        PMR_VALIDATED_HEAD: ''
         PMR_ACTION_REF: ${{ inputs.action-ref }}
         PMR_CONFIG_PATH: ${{ inputs.config-path }}
         PMR_CONFIG_SHA: ${{ inputs.config-sha }}
@@ -81,7 +82,7 @@ runs:
 
     - id: preparation
       name: Save preparation failure
-      if: ${{ failure() && inputs.operation == 'run' && steps.run.outcome == 'failure' && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target') }}
+      if: ${{ failure() && inputs.operation == 'run' && steps.run.outcome == 'failure' && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: pr-merge-readiness-preparation-${{ github.run_id }}-${{ github.run_attempt }}
@@ -97,6 +98,7 @@ runs:
         PMR_SOURCE_REF: ${{ github.action_ref }}
         PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
         PMR_OPERATION: ${{ steps.run.outputs.operation }}
+        PMR_VALIDATED_HEAD: ${{ steps.run.outputs.validated-head }}
         PMR_ACTION_REF: ${{ inputs.action-ref }}
         PMR_CONFIG_PATH: ${{ inputs.config-path }}
         PMR_CONFIG_SHA: ${{ steps.run.outputs.config-sha }}
@@ -125,6 +127,7 @@ runs:
         PMR_SOURCE_REF: ${{ github.action_ref }}
         PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
         PMR_OPERATION: publish-checks
+        PMR_VALIDATED_HEAD: ${{ steps.run.outputs.validated-head }}
         PMR_PR_NUMBER: ''
         PMR_EVENT_PATH: ''
         PMR_ACTION_REF: ${{ inputs.action-ref }}
