@@ -1,6 +1,6 @@
 # 1回の Action 呼出しで処理する
 
-[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、レビュー条件を合わせてください。v0.4.0 の配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` は、Python 同梱バイナリ、`pull_request` の自動観測、fork・Dependabot 除外に対応しています。既存の利用側は、起動条件と両方の SHA をまとめて更新してください。
+[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、レビュー条件を合わせてください。v0.5.0 の配布用 SHA `4790eda7e56840c18a98a1d4c135ab03c119b5f2` は、Python 同梱バイナリ、`pull_request` の自動観測・ラベル更新、fork・Dependabot 除外に対応しています。既存の利用側は、起動条件と両方の SHA をまとめて更新してください。
 
 通常の workflow から Composite Action を1回呼び出します。呼び出し側は起動条件、手動入力、runner、timeout、権限、concurrency を管理し、処理の分岐・順序・レポート保存を Action に任せます。checkout、再利用可能 workflow、生成コマンドは不要です。
 
@@ -16,7 +16,7 @@
 | Run workflow、番号なし | 全 open PR を観測 → 保存 → Check |
 | Run workflow、`update-labels = true` | 全 open PR を観測 → 保存 → Check → ラベル |
 
-`labels = "auto"` は次回リリース向けの機能です。現在の v0.4.0 に固定した利用例ではラベルは手動更新です。[自動ラベルへの移行](#自動ラベルへの移行)に従い、対応リリースの SHA と設定を同時に更新してください。
+`labels = "auto"` は v0.5.0 から利用できます。このリポジトリ自身は自動更新を有効にしています。利用例のラベル設定は既定の手動更新です。[自動ラベルへの移行](#自動ラベルへの移行)に従い、対応リリースの SHA と設定を同時に更新してください。
 
 通常 PR は、作成元とマージ先が同じリポジトリで、作成者が `dependabot[bot]` 以外の PR を指します。PR 状態変更には `pull_request` を使い、タイトル・本文だけの編集は処理を省略します。承認イベントと日次実行は起動条件にしません。手動ラベル更新と PR 番号指定は併用できません。Check が無効ならその公開段階を省略します。CI の開始・完了・再実行では起動しません。競合中の PR では `pull_request` が起動しないため、Run workflow で再評価します。レビュー・スレッド解決・base ブランチへの新しい push をすぐに反映する場合も Run workflow を使います。[GitHub の起動条件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)を参照してください。
 
@@ -67,7 +67,7 @@ bash /absolute/path/to/release-checkout/run-binary.sh validate-config \
 
 Action 更新時は TOML の `action_ref` と workflow の `uses:` を同じ公開済み SHA にまとめて変更します。明示した `action-ref` 入力がある場合はそれも更新します。
 
-バイナリ版では、[Release workflow が作る配布用コミット](releases.md)の SHA を使用してください。現在の利用例は v0.4.0 の配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` に固定しています。ソース checkout で開発する場合は、uv で Python 3.14 を用意して `bash run.sh validate-config --config <path>` を使用できます。
+バイナリ版では、[Release workflow が作る配布用コミット](releases.md)の SHA を使用してください。現在の利用例は v0.5.0 の配布用 SHA `4790eda7e56840c18a98a1d4c135ab03c119b5f2` に固定しています。ソース checkout で開発する場合は、uv で Python 3.14 を用意して `bash run.sh validate-config --config <path>` を使用できます。
 
 Action SHA を更新する PR では、PR head の TOML 検証後、default branch に残る旧 `action_ref` と新しい実行 SHA の照合が `config/action SHA mismatch` で失敗します。この段階では観測・Check 公開へ進みません。移行 PR は通常の必須 CI とレビューで検証し、マージ後に default branch の Run workflow で観測・参考 Check を確認してください。参考用の readiness job を必須 Check として登録しないでください。
 
@@ -79,9 +79,9 @@ Action SHA を更新する PR では、PR head の TOML 検証後、default bran
 
 ### 自動ラベルへの移行
 
-`labels = "auto"` は次回リリースで提供します。v0.4.0 の同梱バイナリはこの値を拒否するため、現在の `.github/` と利用例は `"manual"` を維持しています。
+`labels = "auto"` は v0.5.0 から利用できます。v0.4.0 の同梱バイナリはこの値を拒否するため、参照 SHA と設定を同時に更新します。このリポジトリの `.github/` は v0.5.0 と `"auto"`、利用例は v0.5.0 と既定の `"manual"` を使用しています。
 
-1. [Release workflow](releases.md)でこの変更を含むバイナリを公開し、リリースタグが指す配布用コミットの40桁 SHA を取得します。
+1. [v0.5.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.5.0) 以降のリリースタグが指す配布用コミットの40桁 SHA を取得します。v0.5.0 は `4790eda7e56840c18a98a1d4c135ab03c119b5f2` です。
 2. 利用側の workflow の `uses:` と TOML の `action_ref` をその SHA に揃え、`[publication]` の `labels` を `"auto"` に変更します。`pull_request` の起動条件・権限・concurrency は完全な workflow 例のまま使えます。手動実行だけの workflow には、完全な例の `pull_request` 起動条件も追加します。
 3. default branch への反映後、通常 PR の作成・追加 push で当該 PR に判定ラベルが付き、終了時に管理ラベルが除去されることを確認します。移行 PR と既存 PR の SHA 不一致は「個別 operation と更新」の扱いに従います。
 4. 既存 open PR をまとめて更新する場合は、default branch の Run workflow で PR 番号を空にし、`update-labels = true` を指定します。
@@ -98,7 +98,7 @@ Python と uv を利用側に用意する必要はありません。Linux x64 / 
 
 ### pull_request への移行
 
-このリポジトリの `.github/` と利用例は、公開済み実装 `107e80a91574e277ea3c13e41aeff7710cae77e2` と `pull_request` を使用しています。従来の `pull_request_target` を使っている利用側は、以下を同じ変更で反映します。
+このリポジトリの `.github/` と利用例は、公開済み実装 `4790eda7e56840c18a98a1d4c135ab03c119b5f2` と `pull_request` を使用しています。従来の `pull_request_target` を使っている利用側は、以下を同じ変更で反映します。
 
 1. `uses:` と TOML の `action_ref` を、新実装を含む同じ公開済み40桁 SHA に更新します。
 2. `pull_request_target` を削除し、`pull_request` に opened／reopened／synchronize／edited／ready_for_review／converted_to_draft／closed を設定します。既存の `pull_request.paths` は外して通常 PR 全体を対象にします。`push.paths` と手動入力は維持します。

@@ -4,13 +4,13 @@ GitHub の PR・レビュー・変更履歴を読み取り、レビュー条件�
 
 対応環境は GitHub.com、Ubuntu 22.04 以降の Linux x64 / arm64、Git です。Python プロジェクトは uv 0.12.13 で管理し、リリース時に PyInstaller で Python 3.14 同梱バイナリを生成します。Composite Action は同梱バイナリを起動するため、利用側での uv・Python の導入、依存解決、ビルドは不要です。
 
-> `.github/` と利用例は [v0.4.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.4.0) のバイナリ同梱 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` に固定しています。[リリースと導入](docs/releases.md)に従い、`uses:` と `action_ref` を同じ配布用 SHA に揃えてください。今後のリリースは検証済みバイナリを main に反映してタグを付けます。利用側には、そのタグが指す40桁 SHA を指定します。
+> `.github/` と利用例は [v0.5.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.5.0) のバイナリ同梱 SHA `4790eda7e56840c18a98a1d4c135ab03c119b5f2` に固定しています。[リリースと導入](docs/releases.md)に従い、`uses:` と `action_ref` を同じ配布用 SHA に揃えてください。リリースでは検証済みバイナリを main に反映してタグを付けます。利用側には、そのタグが指す40桁 SHA を指定します。
 
 CI の待機・成功・失敗・再実行履歴は GitHub Checks に任せます。この Action は CI の結果、commit status、`mergeStateStatus` を収集・判定・レポート化しません。CI 定義ファイルの変更は、変更内容に対するレビュー条件として扱います。
 
 > 設定は version 2、観測・レポートは schema version 2 です。version 1 の設定・レポートとは互換性がないため、既存の利用側は [移行手順](docs/workflow.md#公開後の移行)に従い Action SHA と設定を同時に切り替えてください。
 
-> 自動観測と参考 Check は通常 PR が対象です。fork・Dependabot は対象外です。ラベルは既定で手動更新し、次回リリースから `labels = "auto"` で PR イベント時の自動更新も選べます。[完全な workflow 例](examples/pr-merge-readiness.yml)を導入するときは、起動条件・`uses:`・TOML の `action_ref` をまとめて更新してください。
+> 自動観測と参考 Check は通常 PR が対象です。fork・Dependabot は対象外です。ラベルは既定で手動更新し、v0.5.0 から `labels = "auto"` で PR イベント時の自動更新も選べます。このリポジトリ自身は `auto` を使用しています。[完全な workflow 例](examples/pr-merge-readiness.yml)を導入するときは、起動条件・`uses:`・TOML の `action_ref` をまとめて更新してください。
 
 ## クイックスタート
 
@@ -47,10 +47,10 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@107e80a91574e277ea3c13e41aeff7710cae77e2 # v0.4.0
+      - uses: nimiusrd/pr-merge-readiness-action@4790eda7e56840c18a98a1d4c135ab03c119b5f2 # v0.5.0
 ```
 
-`uses:` と設定の `action_ref` は同じ **40 桁 commit SHA** に固定します。この例は v0.4.0 の配布用コミット `107e80a91574e277ea3c13e41aeff7710cae77e2` を使用します。入力 `action-ref` は実際の参照から取得するため、省略できます。
+`uses:` と設定の `action_ref` は同じ **40 桁 commit SHA** に固定します。この例は v0.5.0 の配布用コミット `4790eda7e56840c18a98a1d4c135ab03c119b5f2` を使用します。入力 `action-ref` は実際の参照から取得するため、省略できます。
 
 既定の `operation: run` が、イベントと TOML の設定から設定検証・観測・Check・ラベル更新を選びます。呼び出し側は **1 job・1 step** で利用でき、`if`、`needs`、設定 SHA の受け渡し、artifact の upload/download を組み立てる必要はありません。実装の起動も Action 内で行い、利用側の checkout は不要です。
 
@@ -80,7 +80,7 @@ workflow を編集できる書き込み権限者は信頼対象です。GitHub �
 
 ```toml
 version = 2
-action_ref = "107e80a91574e277ea3c13e41aeff7710cae77e2"
+action_ref = "4790eda7e56840c18a98a1d4c135ab03c119b5f2"
 
 [review]
 minimum_approvals = 0
@@ -99,13 +99,13 @@ labels = "manual"
 
 | `publication.labels` | PR イベント | 手動実行 |
 | --- | --- | --- |
-| `"auto"`（次回リリース） | 対象 PR のラベルを更新 | `update-labels = true` で全 open PR を同期 |
+| `"auto"`（v0.5.0 以降） | 対象 PR のラベルを更新 | `update-labels = true` で全 open PR を同期 |
 | `"manual"`（既定） | ラベルを更新しない | `update-labels = true` で全 open PR を同期 |
 | `"off"` | ラベルを更新しない | ラベル更新要求を拒否 |
 
 ### PR 作成・更新時の自動ラベル
 
-**現在の v0.4.0 バイナリは `"auto"` に未対応です。** この変更を含むリリースの公開後、workflow の `uses:` と TOML の `action_ref` をその配布用 SHA に更新し、default branch の設定を次のように変更します。[移行手順](docs/workflow.md#自動ラベルへの移行)を参照してください。
+**自動ラベルには v0.5.0 以降が必要です。** workflow の `uses:` と TOML の `action_ref` を対応リリースの配布用 SHA に更新し、default branch の設定を次のように変更します。v0.4.0 は `"auto"` を受け付けません。[移行手順](docs/workflow.md#自動ラベルへの移行)を参照してください。
 
 ```toml
 [publication]

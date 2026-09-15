@@ -37,7 +37,9 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 
 ソースコミットと配布用コミットはどちらも main の履歴に残ります。リリースノートにはビルド対象のソース SHA と公開した配布用 SHA を記載します。**Action にはリリースタグが指す40桁 SHA を指定してください。** リリース後の main にはソースだけを変更するコミットも入るため、任意の main の SHA では同梱バイナリとソースの対応を保証できません。`run.sh` はソースから動かす開発用 CLI として残します。
 
-新しいリリース用の配布ブランチは作りません。既存 v0.4.0 は旧方式で公開したため、タグと `codex/releases/v0.4.0` は配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` を指したまま保持します。過去のタグ・コミットは書き換えず、main への反映はこの手順で作る次のリリースから適用します。
+新しいリリース用の配布ブランチは作りません。既存 v0.4.0 は旧方式で公開したため、タグと `codex/releases/v0.4.0` は配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` を指したまま保持します。過去のタグ・コミットは書き換えず、v0.5.0 からこの手順で main に配布物を反映しています。
+
+[v0.5.0 の Release run](https://github.com/nimiusrd/pr-merge-readiness-action/actions/runs/34994639892)では、ソース `e6d305d05cce80eae0411cfb33845b4aef8a6e58` のテスト・静的検査・両 CPU のバイナリ検証が成功し、配布用コミット `4790eda7e56840c18a98a1d4c135ab03c119b5f2` を main とタグに公開しました。`labels = "auto"` に対応する最初のリリースです。
 
 ビルド job の token は読み取り専用、公開 job だけが `contents: write` と `actions: read` を持ちます。main 以外、無効なバージョン、既存タグ、checkout SHA の不一致、未コミット変更、artifact 不足・checksum 不一致は公開前に拒否します。main がビルド対象 SHA から進んだ場合も停止します。確認後に main が進んだ場合やブランチ保護で push が拒否された場合は、通常の fast-forward 制約と atomic push により main とタグをどちらも公開せず終了します。最新 main で新しい run を実行してください。force push や保護設定の変更は行いません。[Git の atomic push](https://git-scm.com/docs/git-push#Documentation/git-push.txt---atomic)を使用します。
 
