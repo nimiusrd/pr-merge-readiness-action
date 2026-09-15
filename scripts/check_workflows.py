@@ -22,6 +22,9 @@ def check_action_flow(action: dict[str, Any]) -> None:
     assert action["inputs"]["action-ref"].get("required", "false") == "false"
     steps = {step["id"]: step for step in action["runs"]["steps"] if "id" in step}
     assert list(steps) == ["run", "preparation", "execute", "observations", "checks", "labels"]
+    assert len(action["runs"]["steps"]) == len(steps)
+    for name in ("run", "execute", "checks", "labels"):
+        assert steps[name]["run"] == 'bash "$PMR_ROOT/run-binary.sh" action'
     assert "continue-on-error" not in steps["execute"]  # 観測失敗を Action 全体に残す。
     for name in ("execute", "checks", "labels"):
         assert steps[name]["env"]["PMR_CONFIG_SHA"] == "${{ steps.run.outputs.config-sha }}"
@@ -137,7 +140,7 @@ def main() -> None:
             uv_setups += 1
             assert step["with"]["python-version"] == "3.14"
             assert "==" + step["with"]["version"] == project["tool"]["uv"]["required-version"]
-    assert uv_setups == 2  # Composite と CI のみ。
+    assert uv_setups == 3  # ソースCI、バイナリCI、リリースビルド。利用側では導入しない。
     ci = load(ROOT / ".github/workflows/ci.yml")
     commands = {step.get("run") for step in ci["jobs"]["test"]["steps"]}
     assert {
@@ -148,6 +151,32 @@ def main() -> None:
         "uv run --locked mypy",
         "uv run --locked python scripts/check_workflows.py",
     } <= commands
+    release = load(ROOT / ".github/workflows/release.yml")
+    assert set(release["on"]) == {"workflow_dispatch"}
+    assert release["permissions"] == {"contents": "read"}
+    assert release["jobs"]["publish"]["needs"] == "build"
+    assert release["jobs"]["publish"]["permissions"] == {"actions": "read", "contents": "write"}
+    assert release["jobs"]["publish"]["steps"][-1]["run"] == "bash scripts/publish_release.sh"
+    for job in (ci["jobs"]["binary"], release["jobs"]["build"]):
+        assert job["strategy"]["matrix"]["include"] == [
+            {"runner": "ubuntu-22.04", "platform": "linux-x64"},
+            {"runner": "ubuntu-22.04-arm", "platform": "linux-arm64"},
+        ]
+        commands = {step.get("run") for step in job["steps"]}
+        assert {
+            "uv sync --locked --group build",
+            "uv run --locked --group build python scripts/build_binary.py",
+            "uv run --locked --group build pytest tests/test_binary.py",
+        } <= commands
+        binary_test = next(
+            step
+            for step in job["steps"]
+            if step.get("run", "").endswith("pytest tests/test_binary.py")
+        )
+        assert (
+            binary_test["env"]["PMR_TEST_BINARY"]
+            == "dist/${{ matrix.platform }}/pr-merge-readiness"
+        )
     for path in (ROOT / "examples").glob("*.toml"):
         validate_config(tomllib.loads(path.read_text()))
     print("Workflow and Action validation passed")

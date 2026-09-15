@@ -2,7 +2,9 @@
 
 GitHub の PR・レビュー・変更履歴を読み取り、レビュー条件の充足と必要な対応を判定する Composite Action です。任意のリポジトリの workflow から `uses:` で呼び出し、PR ごとの JSON と Job Summary を生成できます。参考 Check と手動ラベルの公開にも対応しています。
 
-対応環境は GitHub.com、Ubuntu、Python 3.14、Git です。Python は uv 0.12.13 で管理し、Action・CI・Dev Container で同じ minor を使用します。実行時の Python 依存パッケージはありません。
+対応環境は GitHub.com、Ubuntu 22.04 以降の Linux x64 / arm64、Git です。Python プロジェクトは uv 0.12.13 で管理し、リリース時に PyInstaller で Python 3.14 同梱バイナリを生成します。Composite Action は同梱バイナリを起動するため、利用側での uv・Python の導入、依存解決、ビルドは不要です。
+
+> バイナリ配布は次のリリースから有効です。現在の `.github/` と利用例の固定 SHA `8354fe9105cbb98132dc8d68f3250a6978ccefd6` は uv で起動する公開済み版です。バイナリ版の公開後、[リリースと導入](docs/releases.md)に従い、`uses:` と `action_ref` をバイナリ同梱の配布用コミット SHA に揃えてください。ソースだけの main の SHA は Action の実行に使えません。
 
 CI の待機・成功・失敗・再実行履歴は GitHub Checks に任せます。この Action は CI の結果、commit status、`mergeStateStatus` を収集・判定・レポート化しません。CI 定義ファイルの変更は、変更内容に対するレビュー条件として扱います。
 
@@ -50,7 +52,7 @@ jobs:
 
 `uses:` と設定の `action_ref` は同じ **40 桁 commit SHA** に固定します。この例は pull_request 自動観測対応の公開済み実装 `8354fe9105cbb98132dc8d68f3250a6978ccefd6` を使用します。入力 `action-ref` は実際の参照から取得するため、省略できます。
 
-既定の `operation: run` が、イベントと TOML の設定から設定検証・観測・Check・ラベル更新を選びます。呼び出し側は **1 job・1 step** で利用でき、`if`、`needs`、設定 SHA の受け渡し、artifact の upload/download を組み立てる必要はありません。Python の導入と実装の起動も Action 内で行い、利用側の checkout は不要です。
+既定の `operation: run` が、イベントと TOML の設定から設定検証・観測・Check・ラベル更新を選びます。呼び出し側は **1 job・1 step** で利用でき、`if`、`needs`、設定 SHA の受け渡し、artifact の upload/download を組み立てる必要はありません。実装の起動も Action 内で行い、利用側の checkout は不要です。
 
 PR 番号が空なら全 open PR、指定するとその PR を観測します。ラベル更新は `update-labels = true` を明示した場合だけ実行し、PR 番号指定との併用は拒否します。Check が有効なら、観測 → artifact 保存 → Check → ラベルの順に進み、保存や Check 公開の失敗後はラベルを更新しません。
 
@@ -150,7 +152,7 @@ labels = "manual"
 | `publish-checks` | contents・pull-requests の read、checks の write |
 | `publish-labels` | contents の read、pull-requests・issues の write |
 
-Action は固定版の uv で Python 3.14 を用意し、自身の `run.sh` から `python -I -B` で起動します。利用側の `pyproject.toml`、`uv.toml`、`.python-version`、仮想環境、Python モジュール、`PYTHONPATH`、`sitecustomize`、PR ソースを実行時に参照しません。入力値は環境変数を経由し、シェルコードに直接展開しません。
+Action は `run-binary.sh` で OS と CPU を確認し、自身の `dist/linux-x64/` または `dist/linux-arm64/` のバイナリを起動します。利用側の `pyproject.toml`、`uv.toml`、`.python-version`、仮想環境、Python モジュール、`PYTHONPATH`、`sitecustomize`、PR ソースを実行時に参照しません。入力値は環境変数を経由し、シェルコードに直接展開しません。バイナリは固定した Action コミットに含まれ、実行時に Release assets をダウンロードしません。未対応 OS・CPU、バイナリがない参照では明示的に失敗します。
 
 ## レポートとオフライン再評価
 
@@ -163,14 +165,14 @@ artifact 名は run ID と attempt ごとに分け、保持期間を 30 日に�
 新しい artifact を展開し、その Action SHA を含む、利用者が信頼したローカル Git リポジトリを指定します。
 
 ```sh
-bash /absolute/path/to/pr-merge-readiness-action/run.sh replay \
+bash /absolute/path/to/release-checkout/run-binary.sh replay \
   --report /absolute/path/to/artifact/pr-123.json \
   --source-dir /absolute/path/to/trusted-action-git \
   --source-repository nimiusrd/pr-merge-readiness-action \
   --action-sha <信頼済み40桁SHA>
 ```
 
-保存した出所と指定 SHA を照合し、`git archive` でその commit の評価器と依存モジュールを取り出します。保存情報だけで評価し、通信を禁止した隔離 Python プロセスで判定全体を比較します。現在時刻、現在 checkout、ネットワークは使いません。結果が同じなら `matches: true`、終了コード 0 です。
+保存した出所と指定 SHA を照合し、`git archive` でその commit の評価器と依存モジュールを取り出します。同じバイナリを子プロセスとして起動し、通信を禁止して、取り出した評価器を専用 namespace に読み込みます。バイナリ内の現在の評価器に置き換えず、保存情報による判定全体を比較します。現在時刻、現在 checkout、ネットワークは使いません。結果が同じなら `matches: true`、終了コード 0 です。
 
 CI 条件を含む旧 policy、schema version 1 のレポートは非対応です。旧 artifact の変換や旧形式への fallback はありません。過去の記録を再評価する場合は、その記録と一致する信頼済みの旧版 CLI を別途使用してください。
 
@@ -186,7 +188,11 @@ devcontainer exec --workspace-folder . uv run --locked mypy
 devcontainer exec --workspace-folder . uv run --locked python scripts/check_workflows.py
 ```
 
-`.python-version` で Python 3.14、`uv.lock` で開発依存関係を固定します。依存更新時は `uv lock --upgrade` で lockfile を更新し、上記検証を実行してください。テストは pytest の関数・fixture・パラメータ化で記述し、Ruff で lint と整形、mypy の strict mode でパッケージ・CLI・検証スクリプトを型検査します。
+`.python-version` で Python 3.14、`uv.lock` で開発・ビルド依存関係を固定します。依存更新時は `uv lock --upgrade` で lockfile を更新し、上記検証を実行してください。テストは pytest の関数・fixture・パラメータ化で記述し、Ruff で lint と整形、mypy の strict mode でパッケージ・CLI・検証スクリプトを型検査します。
+
+ソースから CLI を動かす開発用途では、従来どおり `bash run.sh <command>` が uv 管理の Python 3.14 を `-I -B` で起動します。Composite Action はこの開発用 launcher を呼びません。
+
+バイナリのビルド・検証と公開は[リリース手順](docs/releases.md)を参照してください。通常の pytest ではバイナリ専用テストを skip し、CI の Linux x64 / arm64 の各 job ではビルドした実行ファイルを指定して実行します。
 
 実測記録には run URL、attempt、対象 SHA、Action SHA、設定 SHA、JSON 名、期待値・実測値を残し、生 JSON は artifact または Git 外に保存します。
 

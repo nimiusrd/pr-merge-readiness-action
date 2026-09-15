@@ -54,13 +54,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
-      with:
-        version: '0.12.13'
-        python-version: '3.14'
-        enable-cache: false
-    - shell: bash
-      run: env -u UV_CONFIG_FILE -u UV_PROJECT -u UV_PYTHON uv python install --no-config 3.14
     - id: run
       shell: bash
       env:
@@ -78,7 +71,7 @@ runs:
         PMR_REPORT_DIR: ${{ inputs.report-dir }}
         PMR_ARTIFACT_NAME: ${{ inputs.artifact-name }}
         GH_TOKEN: ${{ inputs.token }}
-      run: bash "$PMR_ROOT/run.sh" action
+      run: bash "$PMR_ROOT/run-binary.sh" action
 
     - id: preparation
       name: Save preparation failure
@@ -108,7 +101,7 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         PMR_PR_NUMBER: ${{ steps.run.outputs.pr-number }}
         PMR_EVENT_PATH: ''
-      run: bash "$PMR_ROOT/run.sh" action
+      run: bash "$PMR_ROOT/run-binary.sh" action
     - id: observations
       name: Save observations
       if: ${{ always() && inputs.operation == 'run' && steps.run.outputs.operation == 'observe' && (steps.execute.outcome == 'success' || steps.execute.outcome == 'failure') }}
@@ -137,7 +130,7 @@ runs:
         PMR_REPORT_DIR: ${{ steps.run.outputs.report-dir }}
         PMR_ARTIFACT_NAME: ${{ steps.run.outputs.artifact-name }}
         GH_TOKEN: ${{ inputs.token }}
-      run: bash "$PMR_ROOT/run.sh" action
+      run: bash "$PMR_ROOT/run-binary.sh" action
     - id: labels
       name: Publish manually requested labels
       if: ${{ !cancelled() && inputs.operation == 'run' && steps.run.outcome == 'success' && steps.observations.outcome == 'success' && steps.run.outputs.labels == 'true' && ((steps.run.outputs.checks == 'true' && steps.checks.outcome == 'success') || (steps.run.outputs.checks == 'false' && steps.checks.outcome == 'skipped')) }}
@@ -156,4 +149,4 @@ runs:
         PMR_REPORT_DIR: ${{ steps.run.outputs.report-dir }}
         PMR_ARTIFACT_NAME: ${{ steps.run.outputs.artifact-name }}
         GH_TOKEN: ${{ inputs.token }}
-      run: bash "$PMR_ROOT/run.sh" action
+      run: bash "$PMR_ROOT/run-binary.sh" action

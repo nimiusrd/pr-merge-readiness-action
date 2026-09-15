@@ -12,6 +12,7 @@ from typing import Any, cast
 from .artifacts import validate_report
 from .config import ACTION_REPOSITORY
 from .contracts import Assessment, EvaluationError, sha
+from .process import system_environment
 
 
 def replay(
@@ -33,6 +34,7 @@ def replay(
         ],
         check=True,
         capture_output=True,
+        env=system_environment(),
     ).stdout
     with tempfile.TemporaryDirectory(prefix="readiness-replay-") as directory:
         root = Path(directory)
@@ -47,29 +49,11 @@ def replay(
                 if stream is None:
                     raise EvaluationError("evaluator module content is missing")
                 (package / name).write_bytes(stream.read())
+        command = [sys.executable]
+        if not getattr(sys, "frozen", False):
+            command += ["-I", "-B", str(Path(__file__).resolve().parent.parent / "cli.py")]
         run = subprocess.run(
-            [
-                sys.executable,
-                "-I",
-                "-B",
-                "-c",
-                """
-import json, socket, sys
-def denied(*args, **kwargs):
-    raise RuntimeError("network forbidden during replay")
-socket.socket.connect = denied
-socket.socket.connect_ex = denied
-socket.create_connection = denied
-socket.getaddrinfo = denied
-sys.path.insert(0, sys.argv[1])
-from pr_merge_readiness.evaluate import assess
-report = json.load(sys.stdin)
-result = assess(report["observations"], report["policy"])
-result["provenance"] = report["provenance"]
-print(json.dumps(result))
-""",
-                str(root),
-            ],
+            [*command, "_replay-worker", str(root)],
             cwd=root,
             input=json.dumps(report),
             check=True,

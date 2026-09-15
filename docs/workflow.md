@@ -54,15 +54,16 @@ Action が今回の観測を `pr-merge-readiness-RUN_ID-ATTEMPT` に30日保存�
 
 検証済み head への固定は、自動 `run` 内の観測・Check 公開に適用します。個別の `publish-checks` は各レポートの PR を対象とし、`pull_request` から呼んでもイベント元 PR の head に一律固定しません。
 
-ローカルで TOML を検証する場合は、固定版 Action の CLI を使用できます。
+ローカルで TOML を検証する場合は、バイナリ版リリースを checkout して CLI を使用できます。Linux x64 / arm64 で動作します。
 
 ```sh
-uv python install --no-config 3.14
-bash /absolute/path/to/pr-merge-readiness-action/run.sh validate-config \
+bash /absolute/path/to/release-checkout/run-binary.sh validate-config \
   --config .github/pr-merge-readiness.toml
 ```
 
 Action 更新時は TOML の `action_ref` と workflow の `uses:` を同じ公開済み SHA にまとめて変更します。明示した `action-ref` 入力がある場合はそれも更新します。
+
+バイナリ版では、[Release workflow が作る配布用コミット](releases.md)の SHA を使用してください。現在の利用例が固定する `8354fe9105cbb98132dc8d68f3250a6978ccefd6` は従来の uv 起動版です。ソース checkout で開発する場合は、uv で Python 3.14 を用意して `bash run.sh validate-config --config <path>` を使用できます。
 
 Action SHA を更新する PR では、PR head の TOML 検証後、default branch に残る旧 `action_ref` と新しい実行 SHA の照合が `config/action SHA mismatch` で失敗します。この段階では観測・Check 公開へ進みません。移行 PR は通常の必須 CI とレビューで検証し、マージ後に default branch の Run workflow で観測・参考 Check を確認してください。参考用の readiness job を必須 Check として登録しないでください。
 
@@ -71,6 +72,14 @@ Action SHA を更新する PR では、PR head の TOML 検証後、default bran
 同じ Check・ラベルを更新する既存 writer から切り替える場合は、実行終了を確認してから入口を一つの変更で切り替えます。切り戻しは workflow と TOML を同時に revert します。旧 artifact の変換は行いません。
 
 ## 公開後の移行
+
+### バイナリ版への移行
+
+1. Release workflow の公開完了後、リリースノートに記載された**配布用コミット**の40桁 SHA を取得します。main のソースコミットとは異なります。
+2. `uses:` と TOML の `action_ref` を同じ配布用 SHA に変更します。イベント、権限、設定・レポートの schema は変わりません。
+3. マージ後、default branch の Run workflow で観測・artifact 保存・参考 Check を確認します。uv・Python のセットアップ step がなく、同梱バイナリが動くことを確認します。移行 PR の SHA 不一致は「個別 operation と更新」の扱いに従います。
+
+Python と uv を利用側に用意する必要はありません。Linux x64 / arm64 の対応 runner を指定してください。
 
 ### pull_request への移行
 
