@@ -76,7 +76,7 @@ def verify_source(expected: str) -> None:
             raise EvaluationError("local Action checkout SHA mismatch")
 
 
-def trusted_config(api: GitHub, path: str, config_sha: str, action_ref: str) -> tuple[Config, str]:
+def trusted_config(api: GitHub, path: str, config_sha: str) -> tuple[Config, str]:
     relative_path(path)
     if not config_sha:
         branch = api.request(api.prefix)["default_branch"]
@@ -88,8 +88,6 @@ def trusted_config(api: GitHub, path: str, config_sha: str, action_ref: str) -> 
     if blob.get("type") != "file" or blob.get("encoding") != "base64":
         raise EvaluationError("config must be a regular TOML file")
     config = validate_config(tomllib.loads(base64.b64decode(blob["content"]).decode("utf-8")))
-    if config["action_ref"] != action_ref:
-        raise EvaluationError("config/action SHA mismatch")
     return config, config_sha
 
 
@@ -273,10 +271,8 @@ def run_action() -> int:
         raise EvaluationError("token required")
     if proposal_sha:
         # 提案は検証だけに使い、観測・公開のpolicyはdefault branchから別に確定する。
-        trusted_config(api, values["config-path"], proposal_sha, values["action-ref"])
-    config, config_sha = trusted_config(
-        api, values["config-path"], values["config-sha"], values["action-ref"]
-    )
+        trusted_config(api, values["config-path"], proposal_sha)
+    config, config_sha = trusted_config(api, values["config-path"], values["config-sha"])
     if operation == "prepare":
         if automatic:
             output({"validated-head": proposal_sha})

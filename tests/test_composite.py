@@ -16,11 +16,11 @@ from pr_merge_readiness.cli import main
 from pr_merge_readiness.collect import CollectionError
 from pr_merge_readiness.config import ACTION_REPOSITORY
 from tests.test_collect import FixtureAPI as Reader
-from tests.test_config import ROOT, config, config_text
+from tests.test_config import ROOT, config_text
 from tests.test_publish import FixtureAPI as LabelWriter
 from pr_merge_readiness.publish import DECISION_LABELS
 from tests.test_publish_checks import FixtureAPI as CheckWriter
-from tests.test_support import BASE, HEAD, pr_event
+from tests.test_support import ACTION_SHA, BASE, HEAD, pr_event
 
 
 class Composite:
@@ -31,7 +31,7 @@ class Composite:
         self.directory = directory
         self.context = {
             "github.action_path": str(ROOT),
-            "github.action_ref": config()["action_ref"],
+            "github.action_ref": ACTION_SHA,
             "github.action_repository": ACTION_REPOSITORY,
             "github.repository": "example/project",
             "github.token": "test-token",
@@ -478,12 +478,20 @@ def test_excluded_pr_event_finishes_without_config_reports_or_writes(environment
 
 
 @pytest.mark.parametrize("trusted_mode,proposal_mode", [("auto", "off"), ("manual", "auto")])
-def test_pr_validates_proposal_but_observes_with_default_branch_policy(
-    environment, trusted_mode, proposal_mode
+@pytest.mark.parametrize("legacy_config", ["both", "default-only", "proposal-only", "neither"])
+def test_action_upgrade_uses_default_policy_without_matching_config_action_refs(
+    environment, trusted_mode, proposal_mode, legacy_config
 ):
     directory, event, _, checks, labels, settings = environment
     os.environ["GITHUB_EVENT_NAME"] = "pull_request"
     event.write_text(json.dumps(pr_event()))
+    for key, legacy_ref, keep in (
+        ("text", "e" * 40, legacy_config in {"both", "default-only"}),
+        ("proposal", "f" * 40, legacy_config in {"both", "proposal-only"}),
+    ):
+        settings[key] = re.sub(r"^action_ref = .*\n", "", settings[key], flags=re.MULTILINE)
+        if keep:
+            settings[key] = f'action_ref = "{legacy_ref}"\n' + settings[key]
     settings["proposal"] = settings["proposal"].replace(
         "minimum_approvals = 0", "minimum_approvals = 99"
     )
@@ -496,10 +504,15 @@ def test_pr_validates_proposal_but_observes_with_default_branch_policy(
     assert action.run() == 0
     report = json.loads(action.artifacts["pr-merge-readiness-42-2"]["pr-1.json"])
     assert report["policy"]["minimum_approvals"] == 0
+    assert report["provenance"]["evaluator"]["sha"] == ACTION_SHA
+    assert report["provenance"]["config"]["sha"] == BASE
+    manifest = json.loads(action.artifacts["pr-merge-readiness-42-2"]["manifest.json"])
+    assert manifest["provenance"] == report["provenance"]
     assert checks.writes
     assert bool(labels.names()) is (trusted_mode == "auto")
     assert settings["requests"][0].endswith(f"?ref={HEAD}")
     assert action.context["steps.run.outputs.config-sha"] == BASE
+    assert settings["requests"].count("/repos/example/project/git/ref/heads/trunk") == 1
 
 
 def test_invalid_pr_proposal_saves_diagnostics_without_observing_or_publishing(environment):

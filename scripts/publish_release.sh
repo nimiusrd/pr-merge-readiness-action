@@ -40,7 +40,8 @@ cat > "$notes" <<EOF
 配布ブランチ: main
 
 Linux x64 / arm64 用の Python 3.14 同梱バイナリです。
-利用側の uses と TOML の action_ref を、配布用コミット $release_sha に揃えてください。
+利用側の uses を配布用コミット $release_sha に固定してください。
+TOML の action_ref は不要です。既存設定に残っていても参照せず、設定 version と内容を検証します。
 実行時に uv・Python の導入やビルドは行いません。
 EOF
 for platform in linux-x64 linux-arm64; do

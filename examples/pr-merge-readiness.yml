@@ -1,4 +1,4 @@
-# uses と TOML の action_ref を同じ40桁 SHA に固定します。
+# uses をリリースタグが指す40桁 SHA に固定します。
 name: PR Merge Readiness
 
 on:
@@ -33,4 +33,4 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@4790eda7e56840c18a98a1d4c135ab03c119b5f2 # v0.5.0
+      - uses: nimiusrd/pr-merge-readiness-action@38abf77191ca0801d10dd6bd8c9d387bdad4b911 # v0.5.1

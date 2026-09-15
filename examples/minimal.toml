@@ -1,6 +1,4 @@
-# v0.5.0 のバイナリ同梱 SHA。workflow の uses も同じ SHA に指定します。
 version = 2
-action_ref = "4790eda7e56840c18a98a1d4c135ab03c119b5f2"
 
 [review]
 minimum_approvals = 0
