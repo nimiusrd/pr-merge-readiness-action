@@ -52,7 +52,7 @@ def check_action_flow(action: dict[str, Any]) -> None:
     assert "steps.checks.outcome == 'skipped'" in steps["labels"]["if"]
 
 
-def check_runtime(workflow: dict[str, Any], action_ref: str) -> None:
+def check_runtime(workflow: dict[str, Any]) -> None:
     assert workflow["permissions"] == {}
     assert "concurrency" not in workflow
     assert set(workflow["jobs"]) == {"readiness"}
@@ -71,7 +71,9 @@ def check_runtime(workflow: dict[str, Any], action_ref: str) -> None:
         "pull-requests": "write",
         "issues": "write",
     }
-    assert job["steps"] == [{"uses": ACTION_REPOSITORY + "@" + action_ref}]
+    assert len(job["steps"]) == 1
+    assert set(job["steps"][0]) == {"uses"}
+    assert re.fullmatch(re.escape(ACTION_REPOSITORY) + r"@[0-9a-f]{40}", job["steps"][0]["uses"])
 
 
 def main() -> None:
@@ -86,9 +88,8 @@ def main() -> None:
     assert project["tool"]["ruff"]["target-version"] == "py314"
     for name in ("operation", "checks", "labels", "pr-number", "config-sha"):
         assert action["outputs"][name]["value"] == "${{ steps.run.outputs." + name + " }}"
-    minimal = validate_config(tomllib.loads((ROOT / "examples/minimal.toml").read_text()))
     example = load(ROOT / "examples/pr-merge-readiness.yml")
-    check_runtime(example, minimal["action_ref"])
+    check_runtime(example)
     assert set(example["on"]) == {
         "workflow_dispatch",
         "pull_request",
@@ -109,17 +110,14 @@ def main() -> None:
     assert len(snippets) == 1
     quickstart = yaml.load(snippets[0], Loader=yaml.BaseLoader)
     assert set(quickstart["on"]) == {"workflow_dispatch"}
-    check_runtime(quickstart, minimal["action_ref"])
+    check_runtime(quickstart)
     workflows = [example, quickstart]
     for path in (ROOT / ".github/workflows").glob("*.yml"):
         workflow = load(path)
         workflows.append(workflow)
         if path.name == "pr-merge-readiness.yml":
-            own = validate_config(
-                tomllib.loads((ROOT / ".github/pr-merge-readiness.toml").read_text())
-            )
-            assert own["action_ref"] == minimal["action_ref"]
-            check_runtime(workflow, own["action_ref"])
+            validate_config(tomllib.loads((ROOT / ".github/pr-merge-readiness.toml").read_text()))
+            check_runtime(workflow)
             assert workflow == example
     steps = list(action["runs"]["steps"])
     for workflow in workflows:
