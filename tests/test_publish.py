@@ -149,6 +149,16 @@ def test_collection_failure_without_pr_facts_expires_ready_label():
     assert api.names() == [UNKNOWN]
 
 
+@pytest.mark.parametrize("state", ["open", "closed"])
+def test_automatic_labels_keep_existing_labels_when_event_head_is_outdated(state):
+    api = FixtureAPI([READY, "enhancement"])
+    api.pulls[1].update(state=state)
+    api.pulls[1]["head"]["sha"] = "d" * 40
+    assert publish_pr(api, 1, report(), expected_head=HEAD) == "skipped"
+    assert api.names() == [READY, "enhancement"]
+    assert all(verb == "GET" for verb, _, _ in api.calls)
+
+
 def test_invalid_decision_or_wrong_report_identity_never_writes():
     variants = [report("INVALID"), report(number=2), report()]
     variants[-1]["observations"]["repository"] = "other/repo"

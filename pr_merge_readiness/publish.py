@@ -203,8 +203,12 @@ def sync_labels(api: GitHub, number: int, names: list[str], desired: str | None)
     return "updated" if changed else "unchanged"
 
 
-def publish_pr(api: GitHub, number: int, report: Assessment) -> str:
+def publish_pr(
+    api: GitHub, number: int, report: Assessment, *, expected_head: str | None = None
+) -> str:
     current = api.request(f"{api.prefix}/pulls/{number}")
+    if expected_head is not None and current["head"]["sha"] != expected_head:
+        return "skipped"
     desired = desired_label(report, current, api.repository, number)
     return sync_labels(api, number, [item["name"] for item in current["labels"]], desired)
 
