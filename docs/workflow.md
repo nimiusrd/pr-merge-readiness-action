@@ -28,6 +28,8 @@ open PR の競合判定が `UNKNOWN` の場合、観測開始時と最終確認�
 
 運用時は default branch の設定 SHA を一度確定し、後続処理で同じ設定を使います。途中で default branch が進んでも再解決しません。設定・レポートの出所と Action の実ソースの SHA を照合します。通常 PR では最初に PR head の TOML を検証し、不正なら観測・公開へ進みません。有効な提案でも、観測・公開の policy は default branch から別に取得します。PR のソースコードは実行しません。
 
+`pull_request` の観測開始時・終了時に、API の head SHA と設定を検証したイベントの head SHA が一致することを要求します。不一致なら観測全体を失敗として記録し、PR の判定レポートと Check を公開しません。観測後に追加 push された場合も、Check 公開時の head SHA がイベントと異なれば公開を省略します。古いイベントの検証結果を新しい head に流用せず、新しいイベントで再評価します。
+
 1 job は contents の read と、checks・pull-requests・issues の write を持ちます。`push` と個別の `validate-config` は読み取りだけで動作します。fork・Dependabot の PR イベントでは設定取得前に処理を省略します。
 
 workflow を編集できる書き込み権限者は信頼対象です。この権限者は `permissions` 自体も編集できるため、Action の読み取り専用経路や同じ workflow 内の job 分離は workflow 定義の改変を防ぐ境界ではありません。外部 fork の `pull_request` は GitHub の読み取り専用 token 制限に従います。

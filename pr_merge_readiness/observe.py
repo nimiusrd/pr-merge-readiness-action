@@ -23,6 +23,8 @@ def observe(
     run_id: str,
     attempt: str,
     name: str,
+    *,
+    expected_head: str | None = None,
 ) -> int:
     directory.mkdir(parents=True, exist_ok=True)
     manifest: Manifest = {
@@ -43,7 +45,7 @@ def observe(
     try:
         collector = ChangeHistoryCollector(api)
         for target in targets(api, event, number):
-            facts = collect(api, target, history_collector=collector)
+            facts = collect(api, target, history_collector=collector, expected_head=expected_head)
             result = assess(facts, policy)
             result["provenance"] = source
             filename = f"pr-{target}.json"

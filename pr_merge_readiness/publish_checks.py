@@ -143,7 +143,13 @@ def heading(current: dict[str, Any], run_url: str) -> str:
 
 
 def publish_report(
-    api: GitHub, number: int, report: Assessment, run_url: str, artifact: str
+    api: GitHub,
+    number: int,
+    report: Assessment,
+    run_url: str,
+    artifact: str,
+    *,
+    expected_head: str | None = None,
 ) -> str:
     decision = report["decision"]
     facts = report["observations"]
@@ -156,6 +162,8 @@ def publish_report(
     timestamp(at)
     pr = api.request(f"{api.prefix}/pulls/{number}")
     if not is_publication_target(pr):
+        return "skipped"
+    if expected_head is not None and pr["head"]["sha"] != expected_head:
         return "skipped"
     current = snapshot(pr)
     agrees = all(observed.get(key) == value for key, value in current.items())

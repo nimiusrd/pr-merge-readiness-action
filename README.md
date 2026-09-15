@@ -62,6 +62,8 @@ PR 番号が空なら全 open PR、指定するとその PR を観測します�
 
 対象の `pull_request` は PR head の設定を検証した後、default branch の設定を取得して観測・公開へ進みます。提案設定が不正な場合はそこで失敗し、観測しません。提案設定の policy は観測・公開に使いません。`push` は push 対象 SHA の設定を検証して終了します。運用時は default branch の設定 SHA を一度確定し、最後まで同じ設定を使用します。公開直前にも head/base・状態を確認し、遅延結果で新しい表示を戻しません。
 
+自動観測は設定を検証したイベントの head SHA に固定します。待機中や観測中の追加 push で head が変わった場合は、診断を保存して判定・公開を止めます。観測後に head が変わった場合も Check 公開を省略し、新しい PR イベントで再評価します。
+
 自動入口の job は、観測と公開に必要な権限をまとめて持ちます。PR のソースコードを checkout・実行しません。fork PR と Dependabot の PR は、実行者が人間の場合も自動処理を省略します。手動実行では観測レポートを保存できますが、これらの PR には参考 Check を作成・更新しません。ラベル同期では既存の管理ラベルを除去します。
 
 `pull_request` は競合中の PR では起動しません。競合中の PR、レビュー・スレッド解決・base ブランチの更新を再評価するときは Run workflow を使います。[GitHub の起動条件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)を参照してください。

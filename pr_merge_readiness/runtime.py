@@ -240,8 +240,13 @@ def run_action() -> int:
     policy = policy_from(config)
     event = (
         {}
-        if publishing
+        if publishing and os.environ.get("GITHUB_EVENT_NAME") != "pull_request"
         else json.loads(Path(values["event-path"] or os.environ["GITHUB_EVENT_PATH"]).read_text())
+    )
+    expected_head = (
+        sha(event["pull_request"]["head"]["sha"])
+        if os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
+        else None
     )
     run_id, attempt = os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"]
     run_url = f"https://github.com/{api.repository}/actions/runs/{positive(run_id)}/attempts/{positive(attempt)}"
@@ -273,6 +278,7 @@ def run_action() -> int:
             run_id,
             attempt,
             name,
+            expected_head=expected_head,
         )
         summary(directory / "summary.md")
         return code
@@ -303,7 +309,9 @@ def run_action() -> int:
     for number, report in reports:
         try:
             result = (
-                publish_checks.publish_report(writer, number, report, run_url, name)
+                publish_checks.publish_report(
+                    writer, number, report, run_url, name, expected_head=expected_head
+                )
                 if operation == "publish-checks"
                 else publish.publish_pr(writer, number, report)
             )

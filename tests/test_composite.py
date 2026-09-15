@@ -360,6 +360,57 @@ def test_invalid_pr_proposal_saves_diagnostics_without_observing_or_publishing(e
     assert len(settings["requests"]) == 1
 
 
+@pytest.mark.parametrize("timing", ["queued", "during-observation", "after-observation"])
+def test_pr_head_change_never_publishes_with_only_previous_proposal_validated(
+    environment, monkeypatch, timing
+):
+    directory, event, reader, checks, labels, _ = environment
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+    event.write_text(json.dumps(pr_event()))
+    new_head = "d" * 40
+    # イベントのheadは有効な設定を持つ。追加pushのheadには不正な設定がある。
+    request = reader.request
+
+    def read(path, body=None):
+        if path.endswith(f"?ref={new_head}"):
+            return {
+                "type": "file",
+                "encoding": "base64",
+                "content": base64.b64encode(b"unknown = true").decode(),
+            }
+        return request(path, body)
+
+    monkeypatch.setattr(reader, "request", read)
+    if timing == "queued":
+        reader.state["headRefOid"] = new_head
+        checks.prs[1]["head"]["sha"] = new_head
+    elif timing == "during-observation":
+        reader.drift = {"headRefOid": new_head}
+        checks.prs[1]["head"]["sha"] = new_head
+    else:
+        summary = runtime.summary
+
+        def after_observation(path):
+            summary(path)
+            checks.prs[1]["head"]["sha"] = new_head
+
+        monkeypatch.setattr(runtime, "summary", after_observation)
+    action = Composite(directory)
+    assert action.run() == (0 if timing == "after-observation" else 1)
+    assert not checks.writes and not labels.calls
+    saved = action.artifacts["pr-merge-readiness-42-2"]
+    manifest = json.loads(saved["manifest.json"])
+    if timing == "after-observation":
+        assert not manifest["collection_failed"]
+        assert json.loads(saved["pr-1.json"])["observations"]["pr"]["head_sha"] == HEAD
+    else:
+        assert manifest["collection_failed"]
+        assert not manifest["reports"]
+        assert "head" in json.loads(saved["collection-error.json"])["error"]
+    if timing == "queued":
+        assert not reader.paths  # headの一致を確認する前に変更内容やレビューを収集しない。
+
+
 @pytest.mark.parametrize(
     "state,expected",
     [({"isDraft": True}, "WAITING"), ({"mergeable": "CONFLICTING"}, "HUMAN_REVIEW_REQUIRED")],
