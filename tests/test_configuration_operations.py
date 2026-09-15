@@ -115,13 +115,15 @@ def test_prepare_rejects_conflicting_or_malformed_actual_manual_inputs(context, 
     assert not output.exists()
 
 
-@pytest.mark.parametrize("mutation", ["valid", "unknown-key", "no-action-ref", "permission-denied"])
+@pytest.mark.parametrize(
+    "mutation", ["valid", "unknown-key", "legacy-action-ref", "permission-denied"]
+)
 def test_validate_config_reads_only_explicit_proposal_data(context, mutation):
     api, text, event, output = context
     if mutation == "unknown-key":
         text = "unknown = true\n" + text
-    if mutation == "no-action-ref":
-        text = "\n".join(line for line in text.splitlines() if not line.startswith("action_ref ="))
+    if mutation == "legacy-action-ref":
+        text = f'action_ref = "{"e" * 40}"\n' + text
     api.request.return_value = blob(text)
     if mutation == "permission-denied":
         api.request.side_effect = ValueError("HTTP 403")
@@ -131,7 +133,7 @@ def test_validate_config_reads_only_explicit_proposal_data(context, mutation):
         patch.object(runtime.publish, "GitHub") as writer,
         patch.object(runtime, "observe") as observe,
     ):
-        if mutation in {"valid", "no-action-ref"}:
+        if mutation in {"valid", "legacy-action-ref"}:
             assert runtime.run_action() == 0
             assert output.read_text() == f"config-sha={BASE}\n"
         else:

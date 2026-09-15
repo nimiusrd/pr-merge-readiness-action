@@ -118,8 +118,8 @@ def test_binary_skips_excluded_pr_without_api_or_python(binary, tmp_path, isolat
 @pytest.mark.parametrize("legacy_config", [True, False])
 def test_binary_reads_config_over_http(binary, tmp_path, isolated, legacy_config):
     text = config_text()
-    if not legacy_config:
-        text = "\n".join(line for line in text.splitlines() if not line.startswith("action_ref ="))
+    if legacy_config:
+        text = f'action_ref = "{"e" * 40}"\n' + text
     body = json.dumps(
         {
             "type": "file",

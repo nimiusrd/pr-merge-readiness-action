@@ -4,13 +4,13 @@ GitHub の PR・レビュー・変更履歴を読み取り、レビュー条件�
 
 対応環境は GitHub.com、Ubuntu 22.04 以降の Linux x64 / arm64、Git です。Python プロジェクトは uv 0.12.13 で管理し、リリース時に PyInstaller で Python 3.14 同梱バイナリを生成します。Composite Action は同梱バイナリを起動するため、利用側での uv・Python の導入、依存解決、ビルドは不要です。
 
-> `.github/` と利用例は [v0.4.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.4.0) のバイナリ同梱 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` に固定しています。この版で必要な TOML の `action_ref` は例に残しています。次回リリースではこの項目が不要になり、Action の版は workflow の `uses:` だけで管理します。[リリースと導入](docs/releases.md)に従い、リリースタグが指す40桁 SHA を指定してください。
+> `.github/` と利用例は [v0.5.1](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.5.1) のバイナリ同梱 SHA `38abf77191ca0801d10dd6bd8c9d387bdad4b911` に固定しています。Action の版は workflow の `uses:` で管理し、TOML の `action_ref` は不要です。[リリースと導入](docs/releases.md)に従い、リリースタグが指す40桁 SHA を指定してください。
 
 CI の待機・成功・失敗・再実行履歴は GitHub Checks に任せます。この Action は CI の結果、commit status、`mergeStateStatus` を収集・判定・レポート化しません。CI 定義ファイルの変更は、変更内容に対するレビュー条件として扱います。
 
 > 設定は version 2、観測・レポートは schema version 2 です。version 1 の設定・レポートとは互換性がないため、既存の利用側は [移行手順](docs/workflow.md#公開後の移行)に従い Action SHA と設定を同時に切り替えてください。
 
-> 自動観測と参考 Check は通常 PR が対象です。fork・Dependabot は対象外です。ラベルは既定で手動更新し、v0.5.0 から `labels = "auto"` で PR イベント時の自動更新も選べます。[完全な workflow 例](examples/pr-merge-readiness.yml)を導入するときは、[更新手順](docs/workflow.md#個別-operation-と更新)に従って起動条件と Action の版を合わせてください。
+> 自動観測と参考 Check は通常 PR が対象です。fork・Dependabot は対象外です。ラベルは既定で手動更新し、v0.5.0 から `labels = "auto"` で PR イベント時の自動更新も選べます。このリポジトリ自身は `auto` を使用しています。[完全な workflow 例](examples/pr-merge-readiness.yml)を導入するときは、[更新手順](docs/workflow.md#個別-operation-と更新)に従って起動条件と Action の版を合わせてください。
 
 ## クイックスタート
 
@@ -47,10 +47,10 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@107e80a91574e277ea3c13e41aeff7710cae77e2 # v0.4.0
+      - uses: nimiusrd/pr-merge-readiness-action@38abf77191ca0801d10dd6bd8c9d387bdad4b911 # v0.5.1
 ```
 
-`uses:` は **40 桁 commit SHA** に固定します。この例は v0.4.0 の配布用コミット `107e80a91574e277ea3c13e41aeff7710cae77e2` を使用するため、TOML の `action_ref` にも同じ値が必要です。次回リリースへの更新後は TOML の指定を削除できます。Action 入力の `action-ref` は実際の参照から取得するため、省略できます。
+`uses:` は **40 桁 commit SHA** に固定します。この例は v0.5.1 の配布用コミット `38abf77191ca0801d10dd6bd8c9d387bdad4b911` を使用します。Action 入力の `action-ref` は実際の参照から取得するため、省略できます。TOML には Action の SHA を指定しません。
 
 既定の `operation: run` が、イベントと TOML の設定から設定検証・観測・Check・ラベル更新を選びます。呼び出し側は **1 job・1 step** で利用でき、`if`、`needs`、設定 SHA の受け渡し、artifact の upload/download を組み立てる必要はありません。実装の起動も Action 内で行い、利用側の checkout は不要です。
 
@@ -80,8 +80,6 @@ workflow を編集できる書き込み権限者は信頼対象です。GitHub �
 
 ```toml
 version = 2
-# v0.4.0 / v0.5.0 向け。次回リリース以降はこの行を削除できます。
-action_ref = "107e80a91574e277ea3c13e41aeff7710cae77e2"
 
 [review]
 minimum_approvals = 0
@@ -96,7 +94,7 @@ labels = "manual"
 
 `ci` と `required_checks` は設定に含めません。未知キー、不正型、未対応の設定 version は拒否します。version 1 の設定は受理しません。
 
-次回リリースから `action_ref` は省略可能で、既存設定に残る値も読み捨てます。設定の互換性は `version` と各項目で検証し、Action の SHA とは照合しません。実行元のリポジトリ・フル SHA、観測から公開まで同じ設定コミットを使うこと、PR の head SHA の鮮度は引き続き検証します。公開済み v0.4.0 / v0.5.0 のバイナリにはこの変更が含まれないため、[設定と Action の SHA の分離](docs/workflow.md#設定と-action-の-sha-の分離)の順序で移行してください。
+v0.5.1 から `action_ref` は省略可能で、既存設定に残る値も読み捨てます。設定の互換性は `version` と各項目で検証し、Action の SHA とは照合しません。実行元のリポジトリ・フル SHA、観測から公開まで同じ設定コミットを使うこと、PR の head SHA の鮮度は引き続き検証します。公開済み v0.4.0 / v0.5.0 のバイナリにはこの変更が含まれないため、[設定と Action の SHA の分離](docs/workflow.md#設定と-action-の-sha-の分離)の順序で移行してください。
 
 `review` の全項目は必須です。承認数は 0 以上、レビュー閾値は正の整数です。`publication` は省略でき、既定値は `checks = true`、`labels = "manual"` です。
 

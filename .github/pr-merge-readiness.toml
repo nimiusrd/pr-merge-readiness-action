@@ -1,6 +1,4 @@
-# v0.4.0 を使用中のため action_ref を維持。次回リリースへの更新後に削除できます。
 version = 2
-action_ref = "107e80a91574e277ea3c13e41aeff7710cae77e2"
 
 [review]
 minimum_approvals = 0
@@ -9,4 +7,4 @@ stale_change_review_days = 30
 
 [publication]
 checks = true
-labels = "manual"
+labels = "auto"
