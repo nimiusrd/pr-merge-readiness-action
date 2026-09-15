@@ -117,7 +117,7 @@ def main() -> None:
             )
             assert own["action_ref"] == minimal["action_ref"]
             check_runtime(workflow, own["action_ref"])
-            # 運用中のworkflowは公開済みSHAを使う。新しい起動条件は公開後に移行する。
+            assert workflow == example
     steps = list(action["runs"]["steps"])
     for workflow in workflows:
         assert "on" in workflow and "jobs" in workflow

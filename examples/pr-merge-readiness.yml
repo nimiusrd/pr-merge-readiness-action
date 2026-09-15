@@ -1,5 +1,4 @@
 # uses と TOML の action_ref を同じ40桁 SHA に固定します。
-# この起動条件への移行時は、新実装の公開後に両方の SHA を更新してください。
 name: PR Merge Readiness
 
 on:
@@ -34,4 +33,4 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@27ca8908b993e93eb319c70e7231fa7fd1999b05
+      - uses: nimiusrd/pr-merge-readiness-action@8354fe9105cbb98132dc8d68f3250a6978ccefd6
