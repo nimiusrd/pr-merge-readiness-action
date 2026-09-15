@@ -65,9 +65,12 @@ def invoke(binary, tmp_path, isolated, *args, env=None, code=0):
     return result
 
 
-def test_binary_validates_config_without_python_or_consumer_imports(binary, tmp_path, isolated):
+@pytest.mark.parametrize("mode", ["auto", "manual", "off"])
+def test_binary_validates_config_without_python_or_consumer_imports(
+    binary, tmp_path, isolated, mode
+):
     configuration = tmp_path / "config with spaces.toml"
-    configuration.write_text(config_text())
+    configuration.write_text(config_text().replace('labels = "manual"', f'labels = "{mode}"'))
     result = invoke(binary, tmp_path, isolated, "validate-config", "--config", str(configuration))
     assert json.loads(result.stdout) == {"valid": True}
     configuration.write_text("version = 1\n")

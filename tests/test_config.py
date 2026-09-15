@@ -35,7 +35,7 @@ def test_publication_defaults_and_combinations():
     del value["publication"]
     assert validate_config(value)["publication"] == {"checks": True, "labels": "manual"}
     for checks in (True, False):
-        for labels in ("manual", "off"):
+        for labels in ("auto", "manual", "off"):
             value["publication"] = {"checks": checks, "labels": labels}
             assert validate_config(value)["publication"] == value["publication"]
 
@@ -84,7 +84,7 @@ def test_ci_settings_and_invalid_publication_are_rejected():
     for mutate in (
         lambda v: v.update(ci={"workflows": ["CI"], "required_checks": []}),
         lambda v: v["review"].update(required_checks=[]),
-        lambda v: v["publication"].update(labels="auto"),
+        lambda v: v["publication"].update(labels="always"),
         lambda v: v["publication"].update(checks="false"),
     ):
         value = config()

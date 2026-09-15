@@ -9,12 +9,14 @@
 | イベント | Action 内の動作 |
 | --- | --- |
 | 設定・workflow の `push` | push 対象 SHA の TOML を検証して終了 |
-| 通常 PR の opened／reopened／synchronize／ready_for_review／converted_to_draft、base の編集（`pull_request`） | PR head の TOML を検証 → default branch の設定で当該 PR を観測 → 保存 → Check |
-| 通常 PR の終了（`pull_request: closed`） | PR head の TOML を検証 → default branch の設定で当該 PR を観測 → 保存 → Check |
+| 通常 PR の opened／reopened／synchronize／ready_for_review／converted_to_draft、base の編集（`pull_request`） | PR head の TOML を検証 → default branch の設定で当該 PR を観測 → 保存 → Check → `labels = "auto"` なら当該 PR のラベルを更新 |
+| 通常 PR の終了（`pull_request: closed`） | PR head の TOML を検証 → default branch の設定で当該 PR を観測 → 保存 → Check → `labels = "auto"` なら当該 PR の管理ラベルを除去 |
 | fork・Dependabot・作成元リポジトリが削除された PR の `pull_request` | 設定取得・観測・公開を省略 |
 | Run workflow、PR 番号指定 | 指定 PR を観測 → 保存 → Check |
 | Run workflow、番号なし | 全 open PR を観測 → 保存 → Check |
 | Run workflow、`update-labels = true` | 全 open PR を観測 → 保存 → Check → ラベル |
+
+`labels = "auto"` は次回リリース向けの機能です。現在の v0.4.0 に固定した利用例ではラベルは手動更新です。[自動ラベルへの移行](#自動ラベルへの移行)に従い、対応リリースの SHA と設定を同時に更新してください。
 
 通常 PR は、作成元とマージ先が同じリポジトリで、作成者が `dependabot[bot]` 以外の PR を指します。PR 状態変更には `pull_request` を使い、タイトル・本文だけの編集は処理を省略します。承認イベントと日次実行は起動条件にしません。手動ラベル更新と PR 番号指定は併用できません。Check が無効ならその公開段階を省略します。CI の開始・完了・再実行では起動しません。競合中の PR では `pull_request` が起動しないため、Run workflow で再評価します。レビュー・スレッド解決・base ブランチへの新しい push をすぐに反映する場合も Run workflow を使います。[GitHub の起動条件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)を参照してください。
 
@@ -22,13 +24,13 @@
 
 open PR の競合判定が `UNKNOWN` の場合、観測開始時と最終確認時のそれぞれで、2秒間隔・最大5回の追加取得を行います。確定した場合は同時に取得した head・base などを含む情報で観測と鮮度の確認を行います。上限後も未確定なら `UNKNOWN` を保存し、充足扱いにはしません。その後の確定を反映するには新しい PR イベントまたは Run workflow が必要です。closed／merged PR は確定待ちをしません。
 
-ラベルの同期タイミングは、`update-labels = true` を指定した手動実行だけです。レビュー・変更履歴の条件で、作成元とマージ先が同じリポジトリの open PR にラベルを付けます。公開直前にリポジトリ ID と PR 作成者を確認し、fork PR、作成元リポジトリが削除された PR、作成者が `dependabot[bot]` の PR は付与対象から外して管理ラベルを除去します。実行者が人間でも Dependabot の PR は対象外です。closed／merged PR の管理ラベルも除去します。Draft・競合・open/closed 状態だけではラベル用の判定を変えません。PR 状態のイベントは、参考 Check とレポートを更新するために維持します。
+ラベルは `labels = "auto"` の PR イベントで当該 PR を更新し、`update-labels = true` を指定した手動実行では全 open PR を同期します。既定の `labels = "manual"` は手動同期だけ、`"off"` はラベル更新を無効にします。`"auto"` でも手動実行時は明示的な `update-labels` 入力が必要です。レビュー・変更履歴の条件で、作成元とマージ先が同じリポジトリの open PR にラベルを付けます。公開直前にリポジトリ ID と PR 作成者を確認し、fork PR、作成元リポジトリが削除された PR、作成者が `dependabot[bot]` の PR は付与対象から外して管理ラベルを除去します。実行者が人間でも Dependabot の PR は対象外です。closed／merged PR の管理ラベルも除去します。自動実行では当該 PR だけを処理し、他の closed／merged PR の清掃は手動同期で行います。Draft・競合・open/closed 状態だけではラベル用の判定を変えません。
 
 ## 設定と権限
 
 運用時は default branch の設定 SHA を一度確定し、後続処理で同じ設定を使います。途中で default branch が進んでも再解決しません。設定・レポートの出所と Action の実ソースの SHA を照合します。通常 PR では最初に PR head の TOML を検証し、不正なら観測・公開へ進みません。有効な提案でも、観測・公開の policy は default branch から別に取得します。PR のソースコードは実行しません。
 
-`pull_request` の観測開始時・終了時に、API の head SHA と設定を検証したイベントの head SHA が一致することを要求します。不一致なら観測全体を失敗として記録し、PR の判定レポートと Check を公開しません。観測後に追加 push された場合も、Check 公開時の head SHA がイベントと異なれば公開を省略します。古いイベントの検証結果を新しい head に流用せず、新しいイベントで再評価します。
+`pull_request` の観測開始時・終了時に、API の head SHA と設定を検証したイベントの head SHA が一致することを要求します。不一致なら観測全体を失敗として記録し、PR の判定レポート・Check・ラベルを公開しません。観測後に追加 push された場合も、Check・ラベル公開時の head SHA がイベントと異なれば公開を省略します。古いイベントの検証結果を新しい head に流用せず、新しいイベントで再評価します。
 
 1 job は contents の read と、checks・pull-requests・issues の write を持ちます。`push` と個別の `validate-config` は読み取りだけで動作します。fork・Dependabot の PR イベントでは設定取得前に処理を省略します。
 
@@ -54,6 +56,8 @@ Action が今回の観測を `pr-merge-readiness-RUN_ID-ATTEMPT` に30日保存�
 
 検証済み head への固定は、自動 `run` 内の観測・Check 公開に適用します。個別の `publish-checks` は各レポートの PR を対象とし、`pull_request` から呼んでもイベント元 PR の head に一律固定しません。
 
+`publish-labels` は個別利用でも、PR イベントでは `labels = "auto"` と当該 PR だけの `single_pr` 観測を要求します。別 PR・追加 PR・空のレポート一覧を拒否し、取得済みの PR 情報がある場合は観測 head とイベント head も照合します。公開直前の API の head が異なる場合は更新を省略します。手動実行では `"auto"`／`"manual"`、`update-labels = true`、PR 番号なし、`all_open` 観測を要求します。設定・manifest・全レポートの検証を終えてからラベル定義や PR を更新します。
+
 ローカルで TOML を検証する場合は、バイナリ版リリースを checkout して CLI を使用できます。Linux x64 / arm64 で動作します。
 
 ```sh
@@ -72,6 +76,17 @@ Action SHA を更新する PR では、PR head の TOML 検証後、default bran
 同じ Check・ラベルを更新する既存 writer から切り替える場合は、実行終了を確認してから入口を一つの変更で切り替えます。切り戻しは workflow と TOML を同時に revert します。旧 artifact の変換は行いません。
 
 ## 公開後の移行
+
+### 自動ラベルへの移行
+
+`labels = "auto"` は次回リリースで提供します。v0.4.0 の同梱バイナリはこの値を拒否するため、現在の `.github/` と利用例は `"manual"` を維持しています。
+
+1. [Release workflow](releases.md)でこの変更を含むバイナリを公開し、リリースタグが指す配布用コミットの40桁 SHA を取得します。
+2. 利用側の workflow の `uses:` と TOML の `action_ref` をその SHA に揃え、`[publication]` の `labels` を `"auto"` に変更します。`pull_request` の起動条件・権限・concurrency は完全な workflow 例のまま使えます。手動実行だけの workflow には、完全な例の `pull_request` 起動条件も追加します。
+3. default branch への反映後、通常 PR の作成・追加 push で当該 PR に判定ラベルが付き、終了時に管理ラベルが除去されることを確認します。移行 PR と既存 PR の SHA 不一致は「個別 operation と更新」の扱いに従います。
+4. 既存 open PR をまとめて更新する場合は、default branch の Run workflow で PR 番号を空にし、`update-labels = true` を指定します。
+
+自動更新を止める場合は `labels = "manual"`、手動更新も止める場合は `"off"` に変更します。設定だけの変更は既存ラベルを除去しません。
 
 ### バイナリ版への移行
 

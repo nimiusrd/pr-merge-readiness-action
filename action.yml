@@ -1,5 +1,5 @@
 name: PR Merge Readiness
-description: Observe PR metadata and publish reference Checks or manually requested labels.
+description: Observe PR metadata and publish reference Checks and automatic or manual labels.
 author: nimiusrd
 inputs:
   operation:
@@ -34,7 +34,7 @@ outputs:
     description: Whether Check publication is enabled (run or prepare)
     value: ${{ steps.run.outputs.checks }}
   labels:
-    description: Whether the event explicitly requests labels (run or prepare)
+    description: Whether the configuration and event enable label publication (run or prepare)
     value: ${{ steps.run.outputs.labels }}
   pr-number:
     description: Validated manual PR selection (run or prepare)
@@ -132,7 +132,7 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
       run: bash "$PMR_ROOT/run-binary.sh" action
     - id: labels
-      name: Publish manually requested labels
+      name: Publish labels
       if: ${{ !cancelled() && inputs.operation == 'run' && steps.run.outcome == 'success' && steps.observations.outcome == 'success' && steps.run.outputs.labels == 'true' && ((steps.run.outputs.checks == 'true' && steps.checks.outcome == 'success') || (steps.run.outputs.checks == 'false' && steps.checks.outcome == 'skipped')) }}
       shell: bash
       env:

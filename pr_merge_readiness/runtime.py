@@ -22,7 +22,7 @@ from .config import (
     relative_path,
     validate_config,
 )
-from .contracts import Config, EvaluationError, sha
+from .contracts import Assessment, Config, EvaluationError, sha
 from .observe import observe
 from .process import system_environment
 
@@ -119,8 +119,8 @@ def route(
         positive(pr_number)
     if event_name != "workflow_dispatch" and (pr_number or update_labels):
         raise EvaluationError("manual inputs require workflow_dispatch")
-    if update_labels and (pr_number or config["publication"]["labels"] != "manual"):
-        raise EvaluationError("labels require all open PRs and publication.labels=manual")
+    if update_labels and (pr_number or config["publication"]["labels"] == "off"):
+        raise EvaluationError("labels require all open PRs and publication.labels=auto or manual")
     if event_name == "workflow_dispatch":
         return "observe"
     if event_name == "pull_request":
@@ -142,7 +142,10 @@ def prepare(config: Config, config_sha: str, *, automatic: bool = False) -> int:
     ):
         raise EvaluationError("invalid manual inputs")
     update_labels = labels in ("true", True)
-    operation = route(os.environ["GITHUB_EVENT_NAME"], event, config, pr_number, update_labels)
+    event_name = os.environ["GITHUB_EVENT_NAME"]
+    operation = route(event_name, event, config, pr_number, update_labels)
+    if event_name == "pull_request" and operation == "observe":
+        update_labels = config["publication"]["labels"] == "auto"
     values = {
         "config-sha": config_sha,
         "operation": operation,
@@ -162,6 +165,42 @@ def prepare(config: Config, config_sha: str, *, automatic: bool = False) -> int:
         )
     output(values)
     return 0
+
+
+def label_publication_head(
+    config: Config,
+    event_name: str,
+    event: dict[str, Any],
+    manifest: dict[str, Any],
+    reports: list[tuple[int, Assessment]],
+) -> str | None:
+    """手動は全open PR、自動はイベント元PRに限定し、書込み前に検証する。"""
+    if event_name == "workflow_dispatch" and config["publication"]["labels"] != "off":
+        inputs = event.get("inputs", {})
+        if (
+            not isinstance(inputs, dict)
+            or inputs.get("pr-number")
+            or not (inputs.get("update-labels") is True or inputs.get("update-labels") == "true")
+            or manifest["selection"] != "all_open"
+        ):
+            raise EvaluationError(
+                "labels require explicit update-labels and an all-open observation"
+            )
+        return None
+    if (
+        event_name == "pull_request"
+        and config["publication"]["labels"] == "auto"
+        and pr_event_operation(event) == "observe"
+    ):
+        number = positive(str(event["pull_request"]["number"]))
+        head = sha(event["pull_request"]["head"]["sha"])
+        if manifest["selection"] != "single_pr" or [n for n, _ in reports] != [number]:
+            raise EvaluationError("automatic labels require only the event PR observation")
+        observed = reports[0][1]["observations"].get("pr")
+        if observed is not None and observed["head_sha"] != head:
+            raise EvaluationError("label observation head differs from event PR head")
+        return head
+    raise EvaluationError("labels require an auto PR event or an explicit manual invocation")
 
 
 def run_action() -> int:
@@ -295,24 +334,13 @@ def run_action() -> int:
         return code
     if operation == "publish-checks" and not config["publication"]["checks"]:
         raise EvaluationError("Check publication is disabled")
-    if operation == "publish-labels" and (
-        config["publication"]["labels"] != "manual"
-        or os.environ["GITHUB_EVENT_NAME"] != "workflow_dispatch"
-    ):
-        raise EvaluationError("labels require an explicit manual invocation")
     reports = load_reports(directory, api.repository, run_id, attempt, name, source, policy)
     if operation == "publish-labels":
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-        inputs = event.get("inputs", {})
         manifest = json.loads((directory / "manifest.json").read_text())
-        if (
-            inputs.get("pr-number")
-            or inputs.get("update-labels") not in ("true", True)
-            or manifest["selection"] != "all_open"
-        ):
-            raise EvaluationError(
-                "labels require explicit update-labels and an all-open observation"
-            )
+        expected_head = label_publication_head(
+            config, os.environ["GITHUB_EVENT_NAME"], event, manifest, reports
+        )
     writer = publish.GitHub(api.repository)
     failed = False
     if operation == "publish-labels":
@@ -324,13 +352,13 @@ def run_action() -> int:
                     writer, number, report, run_url, name, expected_head=expected_head
                 )
                 if operation == "publish-checks"
-                else publish.publish_pr(writer, number, report)
+                else publish.publish_pr(writer, number, report, expected_head=expected_head)
             )
             print(json.dumps({"pr": number, "publication": result}, ensure_ascii=False))
         except (publish.PublishError, KeyError, TypeError, ValueError) as error:
             failed = True
             print(json.dumps({"pr": number, "error": str(error)}))
-    if operation == "publish-labels":
+    if operation == "publish-labels" and os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
         publish.cleanup_closed(writer)
     return int(failed)
 

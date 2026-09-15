@@ -51,7 +51,9 @@ def test_routes_and_manual_input_conflicts():
         with pytest.raises(ValueError):
             runtime.route(event, {}, value, number, labels)
     assert runtime.route("workflow_dispatch", {}, value, "1", False) == "observe"
-    assert runtime.route("workflow_dispatch", {}, value, "", True) == "observe"
+    for mode in ("auto", "manual"):
+        value["publication"]["labels"] = mode
+        assert runtime.route("workflow_dispatch", {}, value, "", True) == "observe"
     value["publication"]["labels"] = "off"
     with pytest.raises(ValueError):
         runtime.route("workflow_dispatch", {}, value, "", True)

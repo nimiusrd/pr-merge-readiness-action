@@ -22,7 +22,7 @@ class Policy(ReviewConfig):
 
 class PublicationConfig(TypedDict):
     checks: bool
-    labels: Literal["manual", "off"]
+    labels: Literal["auto", "manual", "off"]
 
 
 class Config(TypedDict):

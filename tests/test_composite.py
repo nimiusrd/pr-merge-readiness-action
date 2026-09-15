@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import re
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -203,9 +204,13 @@ def test_manual_sync_excludes_dependabot_labels_when_run_by_maintainer(environme
     assert all(verb == "GET" for verb, _, _ in labels.calls)
 
 
+@pytest.mark.parametrize("mode", ["auto", "manual"])
 @pytest.mark.parametrize("checks_enabled", [True, False])
-def test_single_call_observes_saves_and_publishes_with_one_config_sha(environment, checks_enabled):
+def test_single_call_observes_saves_and_publishes_with_one_config_sha(
+    environment, checks_enabled, mode
+):
     directory, _, _, checks, labels, settings = environment
+    settings["text"] = settings["text"].replace('labels = "manual"', f'labels = "{mode}"')
     if not checks_enabled:
         settings["text"] = settings["text"].replace("checks = true", "checks = false")
     action = Composite(directory)
@@ -229,12 +234,28 @@ def test_single_call_observes_saves_and_publishes_with_one_config_sha(environmen
     "failure",
     ["prepare", "collection", "insufficient", "upload", "checks", "labels", "tamper", "cancel"],
 )
-def test_failure_boundaries_preserve_evidence_and_suppress_publication(environment, failure):
-    directory, _, reader, checks, labels, settings = environment
+@pytest.mark.parametrize("event_name", ["workflow_dispatch", "pull_request"])
+def test_failure_boundaries_preserve_evidence_and_suppress_publication(
+    environment, monkeypatch, failure, event_name
+):
+    directory, event, reader, checks, labels, settings = environment
+    if event_name == "pull_request":
+        os.environ["GITHUB_EVENT_NAME"] = event_name
+        event.write_text(json.dumps(pr_event()))
+        settings["text"] = settings["text"].replace('labels = "manual"', 'labels = "auto"')
     if failure == "prepare":
         settings["text"] = "invalid TOML"
     elif failure == "collection":
-        reader.pages = lambda *args, **kwargs: (_ for _ in ()).throw(CollectionError("API 403"))
+        if event_name == "workflow_dispatch":
+            reader.pages = lambda *args, **kwargs: (_ for _ in ()).throw(CollectionError("API 403"))
+        else:
+            monkeypatch.setattr(
+                runtime,
+                "observe",
+                lambda *args, **kwargs: (_ for _ in ()).throw(
+                    CollectionError("observation failed")
+                ),
+            )
     elif failure == "insufficient":
         reader.failure = "API 403"
     elif failure == "checks":
@@ -279,8 +300,10 @@ def test_validation_finishes_without_reports_or_writes(environment, event_name):
 @pytest.mark.parametrize(
     "inputs", [{}, {"pr-number": "1"}, {"pr-number": "1", "update-labels": True}]
 )
-def test_manual_inputs_control_labels_inside_the_action(environment, inputs):
-    directory, event, _, checks, labels, _ = environment
+@pytest.mark.parametrize("mode", ["auto", "manual", "off"])
+def test_manual_inputs_control_labels_inside_the_action(environment, inputs, mode):
+    directory, event, _, checks, labels, settings = environment
+    settings["text"] = settings["text"].replace('labels = "manual"', f'labels = "{mode}"')
     event.write_text(json.dumps({"inputs": inputs}))
     action = Composite(directory)
     invalid = bool(inputs.get("update-labels"))
@@ -300,23 +323,147 @@ def test_no_open_prs_is_success_and_saves_an_empty_manifest(environment):
 
 @pytest.mark.parametrize(
     "action_name",
-    ["opened", "reopened", "synchronize", "ready_for_review", "converted_to_draft", "closed"],
+    ["opened", "reopened", "synchronize", "edited", "ready_for_review", "converted_to_draft"],
 )
-def test_pr_events_observe_and_publish_without_waiting_for_ci(environment, action_name):
-    directory, event, _, checks, labels, _ = environment
+@pytest.mark.parametrize("mode", ["auto", "manual", "off"])
+@pytest.mark.parametrize("checks_enabled", [True, False])
+def test_pr_events_observe_and_publish_without_waiting_for_ci(
+    environment, action_name, mode, checks_enabled
+):
+    directory, event, _, checks, labels, settings = environment
+    settings["text"] = settings["text"].replace('labels = "manual"', f'labels = "{mode}"')
+    if not checks_enabled:
+        settings["text"] = settings["text"].replace("checks = true", "checks = false")
     os.environ["GITHUB_EVENT_NAME"] = "pull_request"
-    event.write_text(json.dumps({"action": action_name, "pull_request": checks.prs[1]}))
+    data = {"action": action_name, "pull_request": checks.prs[1]}
+    if action_name == "edited":
+        data["changes"] = {"base": {}}
+    event.write_text(json.dumps(data))
+    # 他のPRと一般ラベルには触れず、対象PRの古い管理ラベルだけを置き換える。
+    labels.pulls[1]["labels"] = [{"name": "enhancement"}, {"name": DECISION_LABELS["WAITING"]}]
+    labels.pulls[2] = {**deepcopy(labels.pulls[1]), "state": "closed"}
+    labels.closed = [{"number": 2, "pull_request": {}}]
     action = Composite(directory)
     assert action.run() == 0
-    assert action.executed == ["run", "execute", "observations", "checks"]
-    assert checks.writes and not labels.calls and action.artifacts
-    assert "SHADOW_CONDITIONS_MET" in checks.writes[0][1]["output"]["title"]
+    assert action.executed == [
+        "run",
+        "execute",
+        "observations",
+        *(["checks"] if checks_enabled else []),
+        *(["labels"] if mode == "auto" else []),
+    ]
+    assert bool(checks.writes) is checks_enabled
+    assert bool(labels.calls) is (mode == "auto")
+    assert labels.names() == [
+        "enhancement",
+        DECISION_LABELS["SHADOW_CONDITIONS_MET" if mode == "auto" else "WAITING"],
+    ]
+    assert labels.names(2) == ["enhancement", DECISION_LABELS["WAITING"]]
+    assert not any("state=closed" in path for _, path, _ in labels.calls)
+    saved = action.artifacts["pr-merge-readiness-42-2"]
+    assert json.loads(saved["manifest.json"])["selection"] == "single_pr"
+    if checks_enabled:
+        assert "SHADOW_CONDITIONS_MET" in checks.writes[0][1]["output"]["title"]
+
+
+@pytest.mark.parametrize("state", ["CLOSED", "MERGED"])
+def test_closed_pr_event_removes_only_its_managed_labels(environment, state):
+    directory, event, reader, checks, labels, settings = environment
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+    settings["text"] = settings["text"].replace('labels = "manual"', 'labels = "auto"')
+    reader.state["state"] = state
+    checks.prs[1]["state"] = labels.pulls[1]["state"] = "closed"
+    if state == "MERGED":
+        checks.prs[1]["merged_at"] = reader.state["updatedAt"]
+    labels.pulls[1]["labels"] = [
+        {"name": "enhancement"},
+        {"name": DECISION_LABELS["SHADOW_CONDITIONS_MET"]},
+    ]
+    event.write_text(json.dumps({"action": "closed", "pull_request": checks.prs[1]}))
+    action = Composite(directory)
+    assert action.run() == 0
+    assert checks.writes
+    assert labels.names() == ["enhancement"]
+    assert not any("state=closed" in path for _, path, _ in labels.calls)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "all-open",
+        "other-pr",
+        "extra-pr",
+        "empty",
+        "other-head",
+        "manual",
+        "off",
+        "fork",
+        "dependabot",
+    ],
+)
+def test_explicit_auto_labels_reject_unrelated_reports_or_events_before_writing(
+    environment, mutation
+):
+    directory, event, _, _, labels, settings = environment
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+    data = pr_event()
+    event.write_text(json.dumps(data))
+    settings["text"] = settings["text"].replace('labels = "manual"', 'labels = "auto"')
+    assert Composite(directory, cancel_before="labels").run() == 1
+    report_dir = directory / "pr-merge-readiness-42-2"
+    manifest = json.loads((report_dir / "manifest.json").read_text())
+    report = json.loads((report_dir / "pr-1.json").read_text())
+    if mutation == "all-open":
+        manifest["selection"] = "all_open"
+    elif mutation == "other-pr":
+        data["pull_request"]["number"] = 2
+    elif mutation == "extra-pr":
+        second = deepcopy(report)
+        second["observations"]["pr"]["number"] = 2
+        (report_dir / "pr-2.json").write_text(json.dumps(second))
+        manifest["reports"].append("pr-2.json")
+    elif mutation == "empty":
+        manifest["reports"] = []
+    elif mutation == "other-head":
+        report["observations"]["pr"]["head_sha"] = "d" * 40
+    elif mutation in {"manual", "off"}:
+        settings["text"] = settings["text"].replace('labels = "auto"', f'labels = "{mutation}"')
+    elif mutation == "fork":
+        data["pull_request"]["head"]["repo"]["id"] = 2
+    else:
+        data["pull_request"]["user"]["login"] = "dependabot[bot]"
+    event.write_text(json.dumps(data))
+    (report_dir / "manifest.json").write_text(json.dumps(manifest))
+    (report_dir / "pr-1.json").write_text(json.dumps(report))
+    action = Composite(
+        directory,
+        {
+            "operation": "publish-labels",
+            "config-sha": BASE,
+            "report-dir": str(report_dir),
+            "artifact-name": "pr-merge-readiness-42-2",
+        },
+    )
+    assert action.run() == 1
+    assert not labels.calls
+
+
+@pytest.mark.parametrize("change", ["title", "body"])
+def test_auto_labels_ignore_title_and_body_edits(environment, change):
+    directory, event, _, checks, labels, settings = environment
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+    settings["text"] = settings["text"].replace('labels = "manual"', 'labels = "auto"')
+    event.write_text(json.dumps({**pr_event("edited"), "changes": {change: {}}}))
+    action = Composite(directory)
+    assert action.run() == 0
+    assert not settings["requests"] and not checks.writes and not labels.calls
 
 
 @pytest.mark.parametrize("excluded", ["fork", "dependabot", "deleted-source"])
 def test_excluded_pr_event_finishes_without_config_reports_or_writes(environment, excluded):
     directory, event, _, checks, labels, settings = environment
     os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+    settings["text"] = settings["text"].replace('labels = "manual"', 'labels = "auto"')
     data = pr_event()
     if excluded == "dependabot":
         data["pull_request"]["user"]["login"] = "dependabot[bot]"
@@ -330,19 +477,27 @@ def test_excluded_pr_event_finishes_without_config_reports_or_writes(environment
     assert not checks.writes and not labels.calls
 
 
-def test_pr_validates_proposal_but_observes_with_default_branch_policy(environment):
-    directory, event, _, checks, _, settings = environment
+@pytest.mark.parametrize("trusted_mode,proposal_mode", [("auto", "off"), ("manual", "auto")])
+def test_pr_validates_proposal_but_observes_with_default_branch_policy(
+    environment, trusted_mode, proposal_mode
+):
+    directory, event, _, checks, labels, settings = environment
     os.environ["GITHUB_EVENT_NAME"] = "pull_request"
     event.write_text(json.dumps(pr_event()))
     settings["proposal"] = settings["proposal"].replace(
         "minimum_approvals = 0", "minimum_approvals = 99"
     )
     settings["proposal"] = settings["proposal"].replace("checks = true", "checks = false")
+    settings["proposal"] = settings["proposal"].replace(
+        'labels = "manual"', f'labels = "{proposal_mode}"'
+    )
+    settings["text"] = settings["text"].replace('labels = "manual"', f'labels = "{trusted_mode}"')
     action = Composite(directory)
     assert action.run() == 0
     report = json.loads(action.artifacts["pr-merge-readiness-42-2"]["pr-1.json"])
     assert report["policy"]["minimum_approvals"] == 0
     assert checks.writes
+    assert bool(labels.names()) is (trusted_mode == "auto")
     assert settings["requests"][0].endswith(f"?ref={HEAD}")
     assert action.context["steps.run.outputs.config-sha"] == BASE
 
@@ -361,13 +516,19 @@ def test_invalid_pr_proposal_saves_diagnostics_without_observing_or_publishing(e
 
 
 @pytest.mark.parametrize("timing", ["queued", "during-observation", "after-observation"])
+@pytest.mark.parametrize("checks_enabled", [True, False])
 def test_pr_head_change_never_publishes_with_only_previous_proposal_validated(
-    environment, monkeypatch, timing
+    environment, monkeypatch, timing, checks_enabled
 ):
-    directory, event, reader, checks, labels, _ = environment
+    directory, event, reader, checks, labels, settings = environment
+    settings["text"] = settings["text"].replace('labels = "manual"', 'labels = "auto"')
+    if not checks_enabled:
+        settings["text"] = settings["text"].replace("checks = true", "checks = false")
     os.environ["GITHUB_EVENT_NAME"] = "pull_request"
     event.write_text(json.dumps(pr_event()))
     new_head = "d" * 40
+    labels.pulls[1]["labels"] = [{"name": DECISION_LABELS["WAITING"]}]
+    labels.pulls[1]["head"]["sha"] = new_head
     # イベントのheadは有効な設定を持つ。追加pushのheadには不正な設定がある。
     request = reader.request
 
@@ -397,7 +558,9 @@ def test_pr_head_change_never_publishes_with_only_previous_proposal_validated(
         monkeypatch.setattr(runtime, "summary", after_observation)
     action = Composite(directory)
     assert action.run() == (0 if timing == "after-observation" else 1)
-    assert not checks.writes and not labels.calls
+    assert not checks.writes
+    assert labels.names() == [DECISION_LABELS["WAITING"]]
+    assert all(verb == "GET" for verb, _, _ in labels.calls)
     saved = action.artifacts["pr-merge-readiness-42-2"]
     manifest = json.loads(saved["manifest.json"])
     if timing == "after-observation":

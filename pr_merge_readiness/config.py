@@ -50,8 +50,8 @@ def validate_config(value: dict[str, Any]) -> Config:
     keys(publication, set(), {"checks", "labels"})
     publication = {"checks": True, "labels": "manual", **publication}
     boolean(publication["checks"], "publication.checks")
-    if publication["labels"] not in ("manual", "off"):
-        raise EvaluationError("publication.labels must be manual or off")
+    if publication["labels"] not in ("auto", "manual", "off"):
+        raise EvaluationError("publication.labels must be auto, manual or off")
     return cast(Config, {**value, "publication": publication})
 
 

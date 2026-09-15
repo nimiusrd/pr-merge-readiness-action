@@ -1,6 +1,6 @@
 # PR Merge Readiness
 
-GitHub の PR・レビュー・変更履歴を読み取り、レビュー条件の充足と必要な対応を判定する Composite Action です。任意のリポジトリの workflow から `uses:` で呼び出し、PR ごとの JSON と Job Summary を生成できます。参考 Check と手動ラベルの公開にも対応しています。
+GitHub の PR・レビュー・変更履歴を読み取り、レビュー条件の充足と必要な対応を判定する Composite Action です。任意のリポジトリの workflow から `uses:` で呼び出し、PR ごとの JSON と Job Summary を生成できます。参考 Check とラベルの公開にも対応しています。
 
 対応環境は GitHub.com、Ubuntu 22.04 以降の Linux x64 / arm64、Git です。Python プロジェクトは uv 0.12.13 で管理し、リリース時に PyInstaller で Python 3.14 同梱バイナリを生成します。Composite Action は同梱バイナリを起動するため、利用側での uv・Python の導入、依存解決、ビルドは不要です。
 
@@ -10,7 +10,7 @@ CI の待機・成功・失敗・再実行履歴は GitHub Checks に任せま�
 
 > 設定は version 2、観測・レポートは schema version 2 です。version 1 の設定・レポートとは互換性がないため、既存の利用側は [移行手順](docs/workflow.md#公開後の移行)に従い Action SHA と設定を同時に切り替えてください。
 
-> 自動観測と参考 Check は通常 PR が対象です。fork・Dependabot は対象外で、ラベル更新は手動です。[完全な workflow 例](examples/pr-merge-readiness.yml)を導入するときは、起動条件・`uses:`・TOML の `action_ref` をまとめて更新してください。
+> 自動観測と参考 Check は通常 PR が対象です。fork・Dependabot は対象外です。ラベルは既定で手動更新し、次回リリースから `labels = "auto"` で PR イベント時の自動更新も選べます。[完全な workflow 例](examples/pr-merge-readiness.yml)を導入するときは、起動条件・`uses:`・TOML の `action_ref` をまとめて更新してください。
 
 ## クイックスタート
 
@@ -54,7 +54,7 @@ jobs:
 
 既定の `operation: run` が、イベントと TOML の設定から設定検証・観測・Check・ラベル更新を選びます。呼び出し側は **1 job・1 step** で利用でき、`if`、`needs`、設定 SHA の受け渡し、artifact の upload/download を組み立てる必要はありません。実装の起動も Action 内で行い、利用側の checkout は不要です。
 
-PR 番号が空なら全 open PR、指定するとその PR を観測します。ラベル更新は `update-labels = true` を明示した場合だけ実行し、PR 番号指定との併用は拒否します。Check が有効なら、観測 → artifact 保存 → Check → ラベルの順に進み、保存や Check 公開の失敗後はラベルを更新しません。
+PR 番号が空なら全 open PR、指定するとその PR を観測します。手動実行のラベル更新は `update-labels = true` を明示した場合だけ実行し、PR 番号指定との併用は拒否します。`labels = "auto"` の場合も、手動実行ではこの入力に従います。Check が有効なら、観測 → artifact 保存 → Check → ラベルの順に進み、保存や Check 公開の失敗後はラベルを更新しません。
 
 判定と観測の成否は別です。Action の成功は処理の成功であり、CI の成功やマージ条件全体の充足を意味しません。PR ごとの結果は Job Summary と artifact で確認してください。
 
@@ -95,7 +95,29 @@ labels = "manual"
 
 `ci` と `required_checks` は設定に含めません。未知キー、不正型、非固定 SHA は拒否します。version 1 の設定は受理しません。
 
-`review` の全項目は必須です。承認数は 0 以上、レビュー閾値は正の整数です。`publication` は省略でき、既定値は `checks = true`、`labels = "manual"`。ラベルのもう一つの値は `"off"` です。
+`review` の全項目は必須です。承認数は 0 以上、レビュー閾値は正の整数です。`publication` は省略でき、既定値は `checks = true`、`labels = "manual"` です。
+
+| `publication.labels` | PR イベント | 手動実行 |
+| --- | --- | --- |
+| `"auto"`（次回リリース） | 対象 PR のラベルを更新 | `update-labels = true` で全 open PR を同期 |
+| `"manual"`（既定） | ラベルを更新しない | `update-labels = true` で全 open PR を同期 |
+| `"off"` | ラベルを更新しない | ラベル更新要求を拒否 |
+
+### PR 作成・更新時の自動ラベル
+
+**現在の v0.4.0 バイナリは `"auto"` に未対応です。** この変更を含むリリースの公開後、workflow の `uses:` と TOML の `action_ref` をその配布用 SHA に更新し、default branch の設定を次のように変更します。[移行手順](docs/workflow.md#自動ラベルへの移行)を参照してください。
+
+```toml
+[publication]
+checks = true
+labels = "auto"
+```
+
+[完全な workflow 例](examples/pr-merge-readiness.yml)の `pull_request` 起動条件で、PR 作成・再オープン・追加 push・base の編集・Draft 切替時に当該 PR のラベルを更新します。PR 終了時は当該 PR の管理ラベルを除去します。自動実行で他の PR を同期・清掃しません。タイトル・本文だけの編集やレビュー・CI のイベントでは更新しません。
+
+公開前にイベント元 PR・観測レポートの PR 番号と head SHA を照合し、追加 push で head が変わっていればラベル更新を省略します。PR の提案設定では自動更新を有効化できず、運用には default branch で確定した設定を使います。
+
+### 承認と変更履歴
 
 [承認を必須にする設定例](examples/review-policy.toml)では、現在 head に対する承認を1件、変更履歴のレビュー閾値を14日に設定しています。
 
