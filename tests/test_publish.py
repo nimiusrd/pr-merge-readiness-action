@@ -44,8 +44,9 @@ def report(decision="WAITING", number=1):
 
 def pull(labels=(), state="open"):
     return {
-        "head": {"sha": HEAD},
-        "base": {"sha": BASE, "ref": "main"},
+        "head": {"sha": HEAD, "repo": {"id": 1, "fork": False}},
+        "base": {"sha": BASE, "ref": "main", "repo": {"id": 1, "fork": False}},
+        "user": {"login": "contributor", "type": "User"},
         "state": state,
         "draft": False,
         "labels": [{"name": name} for name in labels],
@@ -164,6 +165,50 @@ def test_closed_pr_removes_all_managed_labels():
     api.pulls[1]["state"] = "closed"
     publish_pr(api, 1, report())
     assert api.names() == ["bug"]
+
+
+@pytest.mark.parametrize("decision", DECISION_LABELS)
+@pytest.mark.parametrize("head_repository", [{"id": 2, "fork": True}, None])
+def test_fork_or_deleted_source_removes_managed_labels_without_adding(decision, head_repository):
+    api = FixtureAPI(["bug", *MANAGED_LABELS])
+    api.pulls[1]["head"]["repo"] = head_repository
+    assert publish_pr(api, 1, report(decision)) == "updated"
+    assert api.names() == ["bug"]
+    assert all(verb in {"GET", "DELETE"} for verb, _, _ in api.calls)
+    api.calls.clear()
+    assert publish_pr(api, 1, report(decision)) == "unchanged"
+    assert all(verb == "GET" for verb, _, _ in api.calls)
+
+
+def test_same_repository_pr_is_labeled_even_when_repository_is_a_fork():
+    api = FixtureAPI()
+    api.pulls[1]["head"]["repo"]["fork"] = True
+    api.pulls[1]["base"]["repo"]["fork"] = True
+    assert publish_pr(api, 1, report()) == "updated"
+    assert api.names() == [WAITING]
+
+
+@pytest.mark.parametrize("decision", DECISION_LABELS)
+def test_dependabot_pr_removes_managed_labels_without_adding(decision):
+    api = FixtureAPI(["dependencies", *MANAGED_LABELS])
+    api.pulls[1]["user"] = {"login": "dependabot[bot]", "type": "Bot"}
+    assert publish_pr(api, 1, report(decision)) == "updated"
+    assert api.names() == ["dependencies"]
+    assert all(verb in {"GET", "DELETE"} for verb, _, _ in api.calls)
+    api.calls.clear()
+    assert publish_pr(api, 1, report(decision)) == "unchanged"
+    assert all(verb == "GET" for verb, _, _ in api.calls)
+
+
+@pytest.mark.parametrize(
+    "author",
+    [{"login": "contributor", "type": "User"}, {"login": "renovate[bot]", "type": "Bot"}],
+)
+def test_dependencies_label_does_not_exclude_other_authors(author):
+    api = FixtureAPI(["dependencies"])
+    api.pulls[1]["user"] = author
+    assert publish_pr(api, 1, report()) == "updated"
+    assert api.names() == ["dependencies", WAITING]
 
 
 def test_failed_add_preserves_old_label_then_next_run_repairs():

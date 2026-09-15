@@ -19,7 +19,7 @@ from tests.test_config import ROOT, config, config_text
 from tests.test_publish import FixtureAPI as LabelWriter
 from pr_merge_readiness.publish import DECISION_LABELS
 from tests.test_publish_checks import FixtureAPI as CheckWriter
-from tests.test_support import BASE, HEAD
+from tests.test_support import BASE, HEAD, pr_event
 
 
 class Composite:
@@ -136,7 +136,7 @@ def environment(tmp_path, monkeypatch):
     reader, checks, labels = Reader(), CheckWriter(), LabelWriter()
     checks.prs[1]["base"]["ref"] = labels.pulls[1]["base"]["ref"] = reader.state["baseRefName"]
     checks.prs[1]["updated_at"] = reader.state["updatedAt"]
-    settings = {"text": config_text(), "requests": []}
+    settings = {"text": config_text(), "proposal": config_text(), "requests": []}
     request, pages = reader.request, reader.pages
 
     def read(path, body=None):
@@ -147,11 +147,15 @@ def environment(tmp_path, monkeypatch):
             return {"default_branch": "trunk"}
         if path == reader.prefix + "/git/ref/heads/trunk":
             return {"object": {"sha": BASE}}
-        assert path == reader.prefix + f"/contents/.github/pr-merge-readiness.toml?ref={BASE}"
+        assert path in {
+            reader.prefix + f"/contents/.github/pr-merge-readiness.toml?ref={BASE}",
+            reader.prefix + f"/contents/.github/pr-merge-readiness.toml?ref={HEAD}",
+        }
+        text = settings["proposal"] if path.endswith(HEAD) else settings["text"]
         return {
             "type": "file",
             "encoding": "base64",
-            "content": base64.b64encode(settings["text"].encode()).decode(),
+            "content": base64.b64encode(text.encode()).decode(),
         }
 
     def read_pages(path, key=None):
@@ -174,6 +178,29 @@ def environment(tmp_path, monkeypatch):
         ),
     ):
         yield tmp_path, event, reader, checks, labels, settings
+
+
+def test_manual_sync_skips_fork_pr_check_and_labels(environment):
+    directory, _, _, checks, labels, _ = environment
+    labels.pulls[1]["head"]["repo"] = {"id": 2, "fork": True}
+    checks.prs[1]["head"]["repo"] = {"id": 2, "fork": True}
+    action = Composite(directory)
+    assert action.run() == 0
+    assert not checks.writes and action.artifacts
+    assert not labels.names()
+    assert all(verb == "GET" for verb, _, _ in labels.calls)
+
+
+def test_manual_sync_excludes_dependabot_labels_when_run_by_maintainer(environment, monkeypatch):
+    directory, _, _, checks, labels, _ = environment
+    monkeypatch.setenv("GITHUB_ACTOR", "maintainer")
+    labels.pulls[1]["user"] = {"login": "dependabot[bot]", "type": "Bot"}
+    checks.prs[1]["user"] = {"login": "dependabot[bot]", "type": "Bot"}
+    action = Composite(directory)
+    assert action.run() == 0
+    assert not checks.writes and action.artifacts
+    assert not labels.names()
+    assert all(verb == "GET" for verb, _, _ in labels.calls)
 
 
 @pytest.mark.parametrize("checks_enabled", [True, False])
@@ -238,7 +265,12 @@ def test_validation_finishes_without_reports_or_writes(environment, event_name):
     directory, event, _, checks, labels, _ = environment
     os.environ.update(GITHUB_EVENT_NAME=event_name, GITHUB_SHA=BASE)
     event.write_text(json.dumps({"pull_request": {"head": {"sha": BASE}}}))
-    action = Composite(directory)
+    inputs = (
+        {"operation": "validate-config", "config-sha": BASE}
+        if event_name == "pull_request"
+        else None
+    )
+    action = Composite(directory, inputs)
     assert action.run() == 0
     assert action.executed == ["run"]
     assert not checks.writes and not labels.calls and not action.artifacts
@@ -272,13 +304,60 @@ def test_no_open_prs_is_success_and_saves_an_empty_manifest(environment):
 )
 def test_pr_events_observe_and_publish_without_waiting_for_ci(environment, action_name):
     directory, event, _, checks, labels, _ = environment
-    os.environ["GITHUB_EVENT_NAME"] = "pull_request_target"
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request"
     event.write_text(json.dumps({"action": action_name, "pull_request": checks.prs[1]}))
     action = Composite(directory)
     assert action.run() == 0
     assert action.executed == ["run", "execute", "observations", "checks"]
     assert checks.writes and not labels.calls and action.artifacts
     assert "SHADOW_CONDITIONS_MET" in checks.writes[0][1]["output"]["title"]
+
+
+@pytest.mark.parametrize("excluded", ["fork", "dependabot", "deleted-source"])
+def test_excluded_pr_event_finishes_without_config_reports_or_writes(environment, excluded):
+    directory, event, _, checks, labels, settings = environment
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+    data = pr_event()
+    if excluded == "dependabot":
+        data["pull_request"]["user"]["login"] = "dependabot[bot]"
+    else:
+        data["pull_request"]["head"]["repo"] = {"id": 2} if excluded == "fork" else None
+    event.write_text(json.dumps(data))
+    action = Composite(directory)
+    assert action.run() == 0
+    assert action.executed == ["run"]
+    assert not settings["requests"] and not action.artifacts
+    assert not checks.writes and not labels.calls
+
+
+def test_pr_validates_proposal_but_observes_with_default_branch_policy(environment):
+    directory, event, _, checks, _, settings = environment
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+    event.write_text(json.dumps(pr_event()))
+    settings["proposal"] = settings["proposal"].replace(
+        "minimum_approvals = 0", "minimum_approvals = 99"
+    )
+    settings["proposal"] = settings["proposal"].replace("checks = true", "checks = false")
+    action = Composite(directory)
+    assert action.run() == 0
+    report = json.loads(action.artifacts["pr-merge-readiness-42-2"]["pr-1.json"])
+    assert report["policy"]["minimum_approvals"] == 0
+    assert checks.writes
+    assert settings["requests"][0].endswith(f"?ref={HEAD}")
+    assert action.context["steps.run.outputs.config-sha"] == BASE
+
+
+def test_invalid_pr_proposal_saves_diagnostics_without_observing_or_publishing(environment):
+    directory, event, _, checks, labels, settings = environment
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+    event.write_text(json.dumps(pr_event()))
+    settings["proposal"] = "unknown = true\n" + settings["proposal"]
+    action = Composite(directory)
+    assert action.run() == 1
+    assert action.executed == ["run", "preparation"]
+    assert "pr-merge-readiness-preparation-42-2" in action.artifacts
+    assert not checks.writes and not labels.calls
+    assert len(settings["requests"]) == 1
 
 
 @pytest.mark.parametrize(
@@ -303,8 +382,8 @@ def test_manual_labels_only_reflect_reviews_while_check_keeps_pr_state(
 
 def test_pr_event_waits_for_mergeability_before_publishing_check(environment):
     directory, event, reader, checks, labels, _ = environment
-    os.environ["GITHUB_EVENT_NAME"] = "pull_request_target"
-    event.write_text(json.dumps({"action": "opened", "pull_request": {"number": 1}}))
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+    event.write_text(json.dumps(pr_event()))
     reader.state["mergeable"] = "UNKNOWN"
     reader.drift = {"mergeable": "MERGEABLE"}
     with patch("pr_merge_readiness.collect.time.sleep") as sleep:

@@ -1,8 +1,9 @@
 # uses と TOML の action_ref を同じ40桁 SHA に固定します。
+# この起動条件への移行時は、新実装の公開後に両方の SHA を更新してください。
 name: PR Merge Readiness
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, reopened, synchronize, edited, ready_for_review, converted_to_draft, closed]
   workflow_dispatch:
     inputs:
@@ -14,8 +15,6 @@ on:
         description: Update labels for all open PRs
         type: boolean
         default: false
-  pull_request:
-    paths: [.github/pr-merge-readiness.toml, .github/workflows/pr-merge-readiness.yml]
   push:
     paths: [.github/pr-merge-readiness.toml, .github/workflows/pr-merge-readiness.yml]
 

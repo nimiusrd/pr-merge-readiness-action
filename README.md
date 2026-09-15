@@ -8,6 +8,8 @@ CI の待機・成功・失敗・再実行履歴は GitHub Checks に任せま�
 
 > 設定は version 2、観測・レポートは schema version 2 です。`.github/` と利用例は [version 2 対応の公開済み実装](https://github.com/nimiusrd/pr-merge-readiness-action/commit/27ca8908b993e93eb319c70e7231fa7fd1999b05) に固定しています。v0.4.0 の設定・レポートとは互換性がないため、既存の利用側は [移行手順](docs/workflow.md#公開後の移行)に従い Action SHA と設定を同時に切り替えてください。
 
+> `pull_request` による自動観測と fork・Dependabot の除外は、このブランチの新しい実装です。上記の公開済み SHA には含まれません。[新しい workflow 例](examples/pr-merge-readiness.yml)を導入するときは、新実装の公開後に `uses:` と TOML の `action_ref` も更新してください。運用中の `.github/` は公開後に移行します。
+
 ## クイックスタート
 
 1. [最小設定](examples/minimal.toml)を自分のリポジトリの `.github/pr-merge-readiness.toml` にコピーし、承認数と変更履歴のレビュー条件を合わせます。
@@ -56,11 +58,13 @@ PR 番号が空なら全 open PR、指定するとその PR を観測します�
 
 ## PR イベントも処理する
 
-[完全な workflow 例](examples/pr-merge-readiness.yml)には、PR 状態変更と設定・workflow の変更を起動条件として含めています。PR 作成・追加 push・Draft 切替・base 変更・終了時は、その PR を直接観測して Check を更新します。CI 開始・完了では起動しません。
+[完全な workflow 例](examples/pr-merge-readiness.yml)は `pull_request` で起動します。同一リポジトリから作成された、Dependabot 以外の PR が対象です。PR 作成・追加 push・Draft 切替・base 変更・終了時は、その PR を直接観測して Check を更新します。タイトル・本文だけの編集は処理を省略し、CI 開始・完了では起動しません。
 
-`pull_request` は PR head、`push` は push 対象 SHA の設定を検証して終了します。運用イベントでは default branch の設定 SHA を一度確定し、最後まで同じ設定を使用します。公開直前にも head/base・状態を確認し、遅延結果で新しい表示を戻しません。
+対象の `pull_request` は PR head の設定を検証した後、default branch の設定を取得して観測・公開へ進みます。提案設定が不正な場合はそこで失敗し、観測しません。提案設定の policy は観測・公開に使いません。`push` は push 対象 SHA の設定を検証して終了します。運用時は default branch の設定 SHA を一度確定し、最後まで同じ設定を使用します。公開直前にも head/base・状態を確認し、遅延結果で新しい表示を戻しません。
 
-自動入口の job は、観測と公開に必要な権限をまとめて持ちます。設定検証時も同じ権限設定ですが、検証経路は設定の読み取りだけで終了し、観測・公開へ進みません。PR のソースコードを checkout・実行しません。fork PR で token が読み取り専用になっても設定検証は可能です。
+自動入口の job は、観測と公開に必要な権限をまとめて持ちます。PR のソースコードを checkout・実行しません。fork PR と Dependabot の PR は、実行者が人間の場合も自動処理を省略します。手動実行では観測レポートを保存できますが、これらの PR には参考 Check を作成・更新しません。ラベル同期では既存の管理ラベルを除去します。
+
+`pull_request` は競合中の PR では起動しません。競合中の PR、レビュー・スレッド解決・base ブランチの更新を再評価するときは Run workflow を使います。[GitHub の起動条件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)を参照してください。
 
 workflow を編集できる書き込み権限者は信頼対象です。GitHub ではこの権限者が `permissions` も編集できるため、Action の検証経路や同じ workflow 内の job 分離は、workflow 定義の改変を防ぐ境界にはなりません。外部 fork の `pull_request` には GitHub の読み取り専用 token 制限が適用されます。[GitHub の権限設定](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)を参照してください。
 
@@ -110,7 +114,7 @@ labels = "manual"
 
 たとえば Draft や競合があっても、レビュー条件を満たせばラベルは `shadow/レビュー条件充足` です。参考 Check・レポートでは引き続き PR 状態も判定します。観測中に Draft・競合・open/closed・更新時刻だけが変わってもラベルは再観測扱いにしません。head・base・レビュー要求・レビュー内容・未解決スレッドの変化は、ラベルでも再観測が必要です。
 
-手動同期時は open PR のラベルを更新し、closed／merged PR に残る管理ラベルを除去します。終了状態を表すラベルは付けません。次の手動同期で `shadow/CI・レビュー待ち` と `shadow/要マージ判断` の付与も取り除き、既存ラベルの説明を更新します。
+手動同期時は、作成元とマージ先が同じリポジトリの open PR にラベルを付けます。fork PR、作成元リポジトリが削除された PR、Dependabot が作成した PR は付与対象から外し、残っている管理ラベルを除去します。Dependabot は PR 作成者が `dependabot[bot]` かで判定するため、人間による手動実行でも対象外です。closed／merged PR に残る管理ラベルも除去します。終了状態を表すラベルは付けません。次の手動同期で `shadow/CI・レビュー待ち` と `shadow/要マージ判断` の付与も取り除き、既存ラベルの説明を更新します。
 
 判定は `SHADOW_CONDITIONS_MET`、`WAITING`、`HUMAN_REVIEW_REQUIRED`、`INSUFFICIENT_DATA` の 4 種類です。Check の表示名は `Autonomous Merge Shadow / PR #番号`、conclusion は常に `neutral` です。マージや承認、branch protection の変更は行わず、必須 Check として登録する用途ではありません。
 

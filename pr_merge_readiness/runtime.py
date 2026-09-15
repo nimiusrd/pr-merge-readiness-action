@@ -83,6 +83,25 @@ def trusted_config(api: GitHub, path: str, config_sha: str, action_ref: str) -> 
     return config, config_sha
 
 
+def pr_event_operation(event: dict[str, Any]) -> str:
+    if not publish.is_publication_target(event["pull_request"]):
+        return "skip"
+    action = event.get("action")
+    if action == "edited" and "base" not in event.get("changes", {}):
+        return "skip"
+    if action in {
+        "opened",
+        "reopened",
+        "synchronize",
+        "edited",
+        "ready_for_review",
+        "converted_to_draft",
+        "closed",
+    }:
+        return "observe"
+    return "skip"
+
+
 def route(
     event_name: str, event: dict[str, Any], config: Config, pr_number: str, update_labels: bool
 ) -> str:
@@ -94,21 +113,8 @@ def route(
         raise EvaluationError("labels require all open PRs and publication.labels=manual")
     if event_name == "workflow_dispatch":
         return "observe"
-    if event_name == "pull_request_target":
-        action = event.get("action")
-        if action == "closed":
-            return "observe"
-        if action == "edited" and "base" not in event.get("changes", {}):
-            return "skip"
-        if action in {
-            "opened",
-            "reopened",
-            "synchronize",
-            "edited",
-            "ready_for_review",
-            "converted_to_draft",
-        }:
-            return "observe"
+    if event_name == "pull_request":
+        return pr_event_operation(event)
     return "skip"
 
 
@@ -165,6 +171,7 @@ def run_action() -> int:
     }
     operation = values["operation"] or "run"
     automatic = operation == "run"
+    proposal_sha = ""
     if automatic:
         if any(
             values[key]
@@ -174,12 +181,13 @@ def run_action() -> int:
         event_name = os.environ["GITHUB_EVENT_NAME"]
         if event_name == "pull_request":
             event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-            values["config-sha"] = event["pull_request"]["head"]["sha"]
-            operation = "validate-config"
+            operation = "prepare" if pr_event_operation(event) == "observe" else "skip"
+            if operation == "prepare":
+                proposal_sha = sha(event["pull_request"]["head"]["sha"])
         elif event_name == "push":
             values["config-sha"] = os.environ["GITHUB_SHA"]
             operation = "validate-config"
-        elif event_name in {"workflow_dispatch", "pull_request_target"}:
+        elif event_name == "workflow_dispatch":
             operation = "prepare"
         else:
             operation = "skip"
@@ -214,6 +222,9 @@ def run_action() -> int:
         raise EvaluationError("repository must match the workflow context")
     if not (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")):
         raise EvaluationError("token required")
+    if proposal_sha:
+        # 提案は検証だけに使い、観測・公開のpolicyはdefault branchから別に確定する。
+        trusted_config(api, values["config-path"], proposal_sha, values["action-ref"])
     config, config_sha = trusted_config(
         api, values["config-path"], values["config-sha"], values["action-ref"]
     )

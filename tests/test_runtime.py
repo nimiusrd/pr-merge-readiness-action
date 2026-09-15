@@ -15,21 +15,19 @@ from pr_merge_readiness.observe import observe
 from pr_merge_readiness.publish import PublishError
 from tests.test_collect import FixtureAPI
 from tests.test_config import ROOT, config, config_text
-from tests.test_support import BASE, HEAD, policy
+from tests.test_support import BASE, HEAD, policy, pr_event
 
 
 def test_routes_and_manual_input_conflicts():
     value = config()
     for action in ("opened", "reopened", "synchronize", "ready_for_review", "converted_to_draft"):
-        assert (
-            runtime.route("pull_request_target", {"action": action}, value, "", False) == "observe"
-        )
-    assert runtime.route("pull_request_target", {"action": "closed"}, value, "", False) == "observe"
+        assert runtime.route("pull_request", pr_event(action), value, "", False) == "observe"
+    assert runtime.route("pull_request", pr_event("closed"), value, "", False) == "observe"
     for changed in ("title", "body"):
         assert (
             runtime.route(
-                "pull_request_target",
-                {"action": "edited", "changes": {changed: {}}},
+                "pull_request",
+                {**pr_event("edited"), "changes": {changed: {}}},
                 value,
                 "",
                 False,
@@ -38,7 +36,7 @@ def test_routes_and_manual_input_conflicts():
         )
     assert (
         runtime.route(
-            "pull_request_target", {"action": "edited", "changes": {"base": {}}}, value, "", False
+            "pull_request", {**pr_event("edited"), "changes": {"base": {}}}, value, "", False
         )
         == "observe"
     )

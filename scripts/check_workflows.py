@@ -84,10 +84,20 @@ def main() -> None:
     example = load(ROOT / "examples/pr-merge-readiness.yml")
     check_runtime(example, minimal["action_ref"])
     assert set(example["on"]) == {
-        "pull_request_target",
         "workflow_dispatch",
         "pull_request",
         "push",
+    }
+    assert example["on"]["pull_request"] == {
+        "types": [
+            "opened",
+            "reopened",
+            "synchronize",
+            "edited",
+            "ready_for_review",
+            "converted_to_draft",
+            "closed",
+        ]
     }
     snippets = re.findall(r"```yaml\n(.*?)\n```", (ROOT / "README.md").read_text(), re.DOTALL)
     assert len(snippets) == 1
@@ -104,7 +114,7 @@ def main() -> None:
             )
             assert own["action_ref"] == minimal["action_ref"]
             check_runtime(workflow, own["action_ref"])
-            assert workflow == example
+            # 運用中のworkflowは公開済みSHAを使う。新しい起動条件は公開後に移行する。
     steps = list(action["runs"]["steps"])
     for workflow in workflows:
         assert "on" in workflow and "jobs" in workflow

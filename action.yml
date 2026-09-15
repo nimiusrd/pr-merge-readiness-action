@@ -81,7 +81,7 @@ runs:
 
     - id: preparation
       name: Save preparation failure
-      if: ${{ failure() && inputs.operation == 'run' && steps.run.outcome == 'failure' && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target') }}
+      if: ${{ failure() && inputs.operation == 'run' && steps.run.outcome == 'failure' && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: pr-merge-readiness-preparation-${{ github.run_id }}-${{ github.run_attempt }}

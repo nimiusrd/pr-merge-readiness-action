@@ -5,6 +5,18 @@ BASE = "b" * 40
 MERGE = "c" * 40
 
 
+def pr_event(action="opened"):
+    return {
+        "action": action,
+        "pull_request": {
+            "number": 1,
+            "head": {"sha": HEAD, "repo": {"id": 1}},
+            "base": {"sha": BASE, "repo": {"id": 1}},
+            "user": {"login": "contributor", "type": "User"},
+        },
+    }
+
+
 def policy():
     return {
         "stale_change_review_days": 30,
