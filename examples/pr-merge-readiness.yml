@@ -33,4 +33,4 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@8354fe9105cbb98132dc8d68f3250a6978ccefd6
+      - uses: nimiusrd/pr-merge-readiness-action@107e80a91574e277ea3c13e41aeff7710cae77e2 # v0.4.0

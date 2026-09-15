@@ -4,11 +4,11 @@ GitHub の PR・レビュー・変更履歴を読み取り、レビュー条件�
 
 対応環境は GitHub.com、Ubuntu 22.04 以降の Linux x64 / arm64、Git です。Python プロジェクトは uv 0.12.13 で管理し、リリース時に PyInstaller で Python 3.14 同梱バイナリを生成します。Composite Action は同梱バイナリを起動するため、利用側での uv・Python の導入、依存解決、ビルドは不要です。
 
-> バイナリ配布は次のリリースから有効です。現在の `.github/` と利用例の固定 SHA `8354fe9105cbb98132dc8d68f3250a6978ccefd6` は uv で起動する公開済み版です。バイナリ版の公開後、[リリースと導入](docs/releases.md)に従い、`uses:` と `action_ref` をバイナリ同梱の配布用コミット SHA に揃えてください。ソースだけの main の SHA は Action の実行に使えません。
+> `.github/` と利用例は [v0.4.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.4.0) のバイナリ同梱 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` に固定しています。[リリースと導入](docs/releases.md)に従い、`uses:` と `action_ref` を同じ配布用 SHA に揃えてください。ソースだけの main の SHA は Action の実行に使えません。
 
 CI の待機・成功・失敗・再実行履歴は GitHub Checks に任せます。この Action は CI の結果、commit status、`mergeStateStatus` を収集・判定・レポート化しません。CI 定義ファイルの変更は、変更内容に対するレビュー条件として扱います。
 
-> 設定は version 2、観測・レポートは schema version 2 です。`.github/` と利用例は [pull_request 自動観測対応の公開済み実装](https://github.com/nimiusrd/pr-merge-readiness-action/commit/8354fe9105cbb98132dc8d68f3250a6978ccefd6) に固定しています。v0.4.0 の設定・レポートとは互換性がないため、既存の利用側は [移行手順](docs/workflow.md#公開後の移行)に従い Action SHA と設定を同時に切り替えてください。
+> 設定は version 2、観測・レポートは schema version 2 です。version 1 の設定・レポートとは互換性がないため、既存の利用側は [移行手順](docs/workflow.md#公開後の移行)に従い Action SHA と設定を同時に切り替えてください。
 
 > 自動観測と参考 Check は通常 PR が対象です。fork・Dependabot は対象外で、ラベル更新は手動です。[完全な workflow 例](examples/pr-merge-readiness.yml)を導入するときは、起動条件・`uses:`・TOML の `action_ref` をまとめて更新してください。
 
@@ -47,10 +47,10 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@8354fe9105cbb98132dc8d68f3250a6978ccefd6
+      - uses: nimiusrd/pr-merge-readiness-action@107e80a91574e277ea3c13e41aeff7710cae77e2 # v0.4.0
 ```
 
-`uses:` と設定の `action_ref` は同じ **40 桁 commit SHA** に固定します。この例は pull_request 自動観測対応の公開済み実装 `8354fe9105cbb98132dc8d68f3250a6978ccefd6` を使用します。入力 `action-ref` は実際の参照から取得するため、省略できます。
+`uses:` と設定の `action_ref` は同じ **40 桁 commit SHA** に固定します。この例は v0.4.0 の配布用コミット `107e80a91574e277ea3c13e41aeff7710cae77e2` を使用します。入力 `action-ref` は実際の参照から取得するため、省略できます。
 
 既定の `operation: run` が、イベントと TOML の設定から設定検証・観測・Check・ラベル更新を選びます。呼び出し側は **1 job・1 step** で利用でき、`if`、`needs`、設定 SHA の受け渡し、artifact の upload/download を組み立てる必要はありません。実装の起動も Action 内で行い、利用側の checkout は不要です。
 
@@ -80,7 +80,7 @@ workflow を編集できる書き込み権限者は信頼対象です。GitHub �
 
 ```toml
 version = 2
-action_ref = "8354fe9105cbb98132dc8d68f3250a6978ccefd6"
+action_ref = "107e80a91574e277ea3c13e41aeff7710cae77e2"
 
 [review]
 minimum_approvals = 0
