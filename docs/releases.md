@@ -23,7 +23,7 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
   uv run --locked --group build pytest tests/test_binary.py
 ```
 
-ビルド用の依存は `build` group、出力は Git 管理外の `build/` と `dist/` です。通常の `uv sync --locked` は開発・テスト用です。ビルド時は `--group build` を付けます。ローカル Dev Container のビルドはその Linux 環境向けの検証であり、配布物は Release workflow の Ubuntu 22.04 環境で作ります。
+ビルド用の依存は `build` group、作業用ファイルは Git 管理外の `build/`、バイナリの出力先は `dist/` です。Release workflow が配布用のバイナリと checksum を main で追跡します。`.gitignore` の `dist/` は、それ以外の未追跡の出力を除外するために残します。通常の `uv sync --locked` は開発・テスト用です。ビルド時は `--group build` を付けます。ローカル Dev Container のビルドはその Linux 環境向けの検証であり、配布物は Release workflow の Ubuntu 22.04 環境で作ります。ローカルで再ビルドすると追跡済みファイルにも差分が出るため、その差分を実装 PR に含めないでください。
 
 バイナリテストは PATH から Python・uv を外し、利用側の Python 設定・モジュールを置いたディレクトリで実行します。TOML 検証、HTTP による設定取得、対象外 PR の省略、引数の受け渡し、信頼済み Git commit の評価器によるオフライン `replay` を確認します。CI は x64・arm64 の両方でこの検証を行います。
 
@@ -32,16 +32,18 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 1. 実装 PR を main にマージし、CI のソース検証と両 CPU のバイナリ検証の成功を確認します。
 2. Actions の **Release → Run workflow** で main を選び、未使用の `vMAJOR.MINOR.PATCH` を入力します。タグ名は Action の配布版を識別します。Python パッケージを PyPI に公開する処理はありません。
 3. `build` job が source のテスト・静的検査、バイナリのビルド・テストを両 CPU で実行します。成功したバイナリと checksum を同じ run の artifact として保存します。
-4. `publish` job が同じ run の artifact だけを取得し、checksum と実行権限を確認します。元のソースコミットを親として、2つのバイナリと checksum だけを加えた**配布用コミット**を作ります。このコミットを指すタグと `codex/releases/<version>` ブランチを atomic push で同時に公開し、GitHub Release を作成します。片方の参照が拒否された場合は両方とも公開しません。main は進めません。
+4. `publish` job が main の先端とビルド対象のソース SHA の一致を確認し、同じ run の artifact だけを一時ディレクトリに取得します。checksum を検証し、`dist/` の2つのバイナリと checksum を置き換えます。変更があればソースコミットを親とする**配布用コミット**を作り、main の更新とそのコミットを指すタグの作成を atomic push で同時に公開してから、GitHub Release を作成します。バイナリと checksum が既存の内容と同じ場合は、現在の main コミットにタグを付けます。
 5. リリースノートの配布用コミット SHA を確認し、利用側の `uses:` と TOML の `action_ref` を同じ40桁 SHA に変更します。このリポジトリ自身の `.github/`・利用例・README と、利用側リポジトリの固定 SHA も更新します。[移行時の確認](workflow.md#バイナリ版への移行)に従ってマージ後の手動観測を確認します。
 
-ソースコミットと配布用コミットの関係は、`ソース SHA → dist/ のみ追加した配布用 SHA ← リリースタグ・配布ブランチ` です。リリースノートには両方の SHA と配布ブランチを残します。**Action には配布用 SHA を指定してください。** main や実装 PR には生成物を置かないため、ソース SHA を指定すると `Release binary missing` で失敗します。`run.sh` はソースから動かす開発用 CLI として残します。
+ソースコミットと配布用コミットはどちらも main の履歴に残ります。リリースノートにはビルド対象のソース SHA と公開した配布用 SHA を記載します。**Action にはリリースタグが指す40桁 SHA を指定してください。** リリース後の main にはソースだけを変更するコミットも入るため、任意の main の SHA では同梱バイナリとソースの対応を保証できません。`run.sh` はソースから動かす開発用 CLI として残します。
 
-配布ブランチはリリースごとに保持し、削除・移動・main へのマージをしません。タグだけで公開すると、GitHub が「どのブランチにも属していない」と警告するためです。v0.4.0 の配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` にも、同じ SHA を指す `codex/releases/v0.4.0` を追加しています。バイナリ・タグ・利用側の固定 SHA はそのままです。
+新しいリリース用の配布ブランチは作りません。既存 v0.4.0 は旧方式で公開したため、タグと `codex/releases/v0.4.0` は配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` を指したまま保持します。過去のタグ・コミットは書き換えず、main への反映はこの手順で作る次のリリースから適用します。
 
-ビルド job の token は読み取り専用、公開 job だけが `contents: write` と `actions: read` を持ちます。main 以外、無効なバージョン、既存タグ・配布ブランチ、checkout SHA の不一致、未コミット変更、artifact 不足・checksum 不一致は公開前に拒否します。
+ビルド job の token は読み取り専用、公開 job だけが `contents: write` と `actions: read` を持ちます。main 以外、無効なバージョン、既存タグ、checkout SHA の不一致、未コミット変更、artifact 不足・checksum 不一致は公開前に拒否します。main がビルド対象 SHA から進んだ場合も停止します。確認後に main が進んだ場合やブランチ保護で push が拒否された場合は、通常の fast-forward 制約と atomic push により main とタグをどちらも公開せず終了します。最新 main で新しい run を実行してください。force push や保護設定の変更は行いません。[Git の atomic push](https://git-scm.com/docs/git-push#Documentation/git-push.txt---atomic)を使用します。
 
-タグ・配布ブランチの公開後に GitHub Release の作成だけが失敗した場合、同じバージョンでの再実行は既存参照として停止します。両方の参照を動かさず、その配布用コミットと元の run の検証済み artifact を確認し、同じ配布物で Release 作成を完了してください。別のソースや再ビルドしたバイナリを同じタグ・配布ブランチへ上書きしません。
+現在の main の保護設定は削除・force push の禁止です。Release workflow の `GITHUB_TOKEN` で main に通常の push を行います。この token による push は新たな CI を起動しないため、公開の根拠は同じ Release run 内で完了したソース・両 CPU のバイナリ検証です。[GitHub のイベント起動仕様](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)を参照してください。
+
+main・タグの公開後に GitHub Release の作成だけが失敗した場合、同じバージョンでの再実行は既存タグとして停止します。公開済み main を巻き戻さず、タグが指す配布用コミットと元の run の検証済み artifact を確認し、同じ配布物で Release 作成を完了してください。タグの移動や、別のソース・再ビルドしたバイナリによる同一バージョンの上書きは行いません。
 
 ## CLI と replay
 

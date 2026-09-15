@@ -4,7 +4,7 @@ GitHub の PR・レビュー・変更履歴を読み取り、レビュー条件�
 
 対応環境は GitHub.com、Ubuntu 22.04 以降の Linux x64 / arm64、Git です。Python プロジェクトは uv 0.12.13 で管理し、リリース時に PyInstaller で Python 3.14 同梱バイナリを生成します。Composite Action は同梱バイナリを起動するため、利用側での uv・Python の導入、依存解決、ビルドは不要です。
 
-> `.github/` と利用例は [v0.4.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.4.0) のバイナリ同梱 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` に固定しています。[リリースと導入](docs/releases.md)に従い、`uses:` と `action_ref` を同じ配布用 SHA に揃えてください。ソースだけの main の SHA は Action の実行に使えません。
+> `.github/` と利用例は [v0.4.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.4.0) のバイナリ同梱 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` に固定しています。[リリースと導入](docs/releases.md)に従い、`uses:` と `action_ref` を同じ配布用 SHA に揃えてください。今後のリリースは検証済みバイナリを main に反映してタグを付けます。利用側には、そのタグが指す40桁 SHA を指定します。
 
 CI の待機・成功・失敗・再実行履歴は GitHub Checks に任せます。この Action は CI の結果、commit status、`mergeStateStatus` を収集・判定・レポート化しません。CI 定義ファイルの変更は、変更内容に対するレビュー条件として扱います。
 
