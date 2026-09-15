@@ -1,6 +1,6 @@
 # 1回の Action 呼出しで処理する
 
-[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、レビュー条件を合わせてください。現在記載している公開済み SHA `27ca8908b993e93eb319c70e7231fa7fd1999b05` は、新しい `pull_request` の自動観測と fork・Dependabot 除外に未対応です。新実装の公開後に、起動条件と両方の SHA をまとめて更新してください。
+[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、レビュー条件を合わせてください。公開済み SHA `8354fe9105cbb98132dc8d68f3250a6978ccefd6` は、`pull_request` の自動観測と fork・Dependabot 除外に対応しています。既存の利用側は、起動条件と両方の SHA をまとめて更新してください。
 
 通常の workflow から Composite Action を1回呼び出します。呼び出し側は起動条件、手動入力、runner、timeout、権限、concurrency を管理し、処理の分岐・順序・レポート保存を Action に任せます。checkout、再利用可能 workflow、生成コマンドは不要です。
 
@@ -64,17 +64,19 @@ bash /absolute/path/to/pr-merge-readiness-action/run.sh validate-config \
 
 Action 更新時は TOML の `action_ref` と workflow の `uses:` を同じ公開済み SHA にまとめて変更します。明示した `action-ref` 入力がある場合はそれも更新します。
 
+Action SHA を更新する PR では、PR head の TOML 検証後、default branch に残る旧 `action_ref` と新しい実行 SHA の照合が `config/action SHA mismatch` で失敗します。この段階では観測・Check 公開へ進みません。移行 PR は通常の必須 CI とレビューで検証し、マージ後に default branch の Run workflow で観測・参考 Check を確認してください。参考用の readiness job を必須 Check として登録しないでください。
+
 同じ Check・ラベルを更新する既存 writer から切り替える場合は、実行終了を確認してから入口を一つの変更で切り替えます。切り戻しは workflow と TOML を同時に revert します。旧 artifact の変換は行いません。
 
 ## 公開後の移行
 
 ### pull_request への移行
 
-このリポジトリの運用中の `.github/` は、公開済み実装 `27ca8908b993e93eb319c70e7231fa7fd1999b05` と従来の起動条件を使用しています。新実装を公開してから、以下を同じ変更で反映します。利用側も同じ手順です。
+このリポジトリの `.github/` と利用例は、公開済み実装 `8354fe9105cbb98132dc8d68f3250a6978ccefd6` と `pull_request` を使用しています。従来の `pull_request_target` を使っている利用側は、以下を同じ変更で反映します。
 
 1. `uses:` と TOML の `action_ref` を、新実装を含む同じ公開済み40桁 SHA に更新します。
 2. `pull_request_target` を削除し、`pull_request` に opened／reopened／synchronize／edited／ready_for_review／converted_to_draft／closed を設定します。既存の `pull_request.paths` は外して通常 PR 全体を対象にします。`push.paths` と手動入力は維持します。
-3. 通常 PR の更新で参考 Check が更新され、fork・Dependabot では省略されることを確認します。競合中の通常 PR は手動実行で確認します。
+3. マージ後に通常 PR の更新で参考 Check が更新され、fork・Dependabot では省略されることを確認します。競合中の通常 PR は手動実行で確認します。移行 PR 自体の SHA 不一致については「個別 operation と更新」を参照してください。
 4. Run workflow の `update-labels = true` で同期し、fork・Dependabot に残る管理ラベルを除去します。
 
 旧 SHA のまま起動条件だけ変更すると、`pull_request` は設定検証だけで終了し、自動 Check 更新が止まります。設定・レポートの schema version は今回変更しません。

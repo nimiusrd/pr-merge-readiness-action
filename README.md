@@ -6,9 +6,9 @@ GitHub の PR・レビュー・変更履歴を読み取り、レビュー条件�
 
 CI の待機・成功・失敗・再実行履歴は GitHub Checks に任せます。この Action は CI の結果、commit status、`mergeStateStatus` を収集・判定・レポート化しません。CI 定義ファイルの変更は、変更内容に対するレビュー条件として扱います。
 
-> 設定は version 2、観測・レポートは schema version 2 です。`.github/` と利用例は [version 2 対応の公開済み実装](https://github.com/nimiusrd/pr-merge-readiness-action/commit/27ca8908b993e93eb319c70e7231fa7fd1999b05) に固定しています。v0.4.0 の設定・レポートとは互換性がないため、既存の利用側は [移行手順](docs/workflow.md#公開後の移行)に従い Action SHA と設定を同時に切り替えてください。
+> 設定は version 2、観測・レポートは schema version 2 です。`.github/` と利用例は [pull_request 自動観測対応の公開済み実装](https://github.com/nimiusrd/pr-merge-readiness-action/commit/8354fe9105cbb98132dc8d68f3250a6978ccefd6) に固定しています。v0.4.0 の設定・レポートとは互換性がないため、既存の利用側は [移行手順](docs/workflow.md#公開後の移行)に従い Action SHA と設定を同時に切り替えてください。
 
-> `pull_request` による自動観測と fork・Dependabot の除外は、このブランチの新しい実装です。上記の公開済み SHA には含まれません。[新しい workflow 例](examples/pr-merge-readiness.yml)を導入するときは、新実装の公開後に `uses:` と TOML の `action_ref` も更新してください。運用中の `.github/` は公開後に移行します。
+> 自動観測と参考 Check は通常 PR が対象です。fork・Dependabot は対象外で、ラベル更新は手動です。[完全な workflow 例](examples/pr-merge-readiness.yml)を導入するときは、起動条件・`uses:`・TOML の `action_ref` をまとめて更新してください。
 
 ## クイックスタート
 
@@ -45,10 +45,10 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@27ca8908b993e93eb319c70e7231fa7fd1999b05
+      - uses: nimiusrd/pr-merge-readiness-action@8354fe9105cbb98132dc8d68f3250a6978ccefd6
 ```
 
-`uses:` と設定の `action_ref` は同じ **40 桁 commit SHA** に固定します。この例は version 2 対応の公開済み実装 `27ca8908b993e93eb319c70e7231fa7fd1999b05` を使用します。入力 `action-ref` は実際の参照から取得するため、省略できます。
+`uses:` と設定の `action_ref` は同じ **40 桁 commit SHA** に固定します。この例は pull_request 自動観測対応の公開済み実装 `8354fe9105cbb98132dc8d68f3250a6978ccefd6` を使用します。入力 `action-ref` は実際の参照から取得するため、省略できます。
 
 既定の `operation: run` が、イベントと TOML の設定から設定検証・観測・Check・ラベル更新を選びます。呼び出し側は **1 job・1 step** で利用でき、`if`、`needs`、設定 SHA の受け渡し、artifact の upload/download を組み立てる必要はありません。Python の導入と実装の起動も Action 内で行い、利用側の checkout は不要です。
 
@@ -78,7 +78,7 @@ workflow を編集できる書き込み権限者は信頼対象です。GitHub �
 
 ```toml
 version = 2
-action_ref = "27ca8908b993e93eb319c70e7231fa7fd1999b05"
+action_ref = "8354fe9105cbb98132dc8d68f3250a6978ccefd6"
 
 [review]
 minimum_approvals = 0
