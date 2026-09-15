@@ -1,0 +1,79 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: New release tag (vMAJOR.MINOR.PATCH)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux-x64
+          - runner: ubuntu-22.04-arm
+            platform: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate release request
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$RELEASE_VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          remote_tag="$(git ls-remote --tags origin "refs/tags/$RELEASE_VERSION")"
+          test -z "$remote_tag"
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: '0.12.13'
+          python-version: '3.14'
+          enable-cache: true
+      - run: uv sync --locked --group build
+      - run: uv run --locked pytest
+      - run: uv run --locked ruff check .
+      - run: uv run --locked ruff format --check .
+      - run: uv run --locked mypy
+      - run: uv run --locked python scripts/check_workflows.py
+      - run: uv run --locked --group build python scripts/build_binary.py
+      - run: uv run --locked --group build pytest tests/test_binary.py
+        env:
+          PMR_TEST_BINARY: dist/${{ matrix.platform }}/pr-merge-readiness
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: binary-${{ matrix.platform }}
+          path: dist/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Create binary release commit and tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash scripts/publish_release.sh

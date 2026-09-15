@@ -5,6 +5,7 @@ import html
 import json
 import os
 import subprocess
+import sys
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -23,8 +24,13 @@ from .config import (
 )
 from .contracts import Config, EvaluationError, sha
 from .observe import observe
+from .process import system_environment
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = (
+    Path(sys.executable).resolve().parent.parent.parent
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parent.parent
+)
 
 
 def output(values: Mapping[str, object]) -> None:
@@ -56,7 +62,11 @@ def verify_source(expected: str) -> None:
         # ローカル Action の場合も、親にある利用側 checkout の SHA で代用しない。
         def git(*args: str) -> str:
             return subprocess.run(
-                ["git", "-C", str(ROOT), *args], check=True, capture_output=True, text=True
+                ["git", "-C", str(ROOT), *args],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=system_environment(),
             ).stdout.strip()
 
         if (

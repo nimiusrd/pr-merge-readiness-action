@@ -76,7 +76,7 @@ class Composite:
     def run(self):
         for step in self.action["runs"]["steps"]:
             if "id" not in step:
-                continue  # uv/Python の導入は既存の隔離起動テストで検証する。
+                continue
             name = step["id"]
             self.cancelled |= name == self.cancel_before
             condition = step.get("if", "success()")
