@@ -1,4 +1,4 @@
-"""設定の欠落・型不正・不正な固定参照は成功扱いしない。"""
+"""設定は Action の版から独立させ、必須項目・型・version を検証する。"""
 
 import pytest
 import tomllib
@@ -28,6 +28,17 @@ def test_examples_define_review_policy_without_ci(name, approvals, days):
     }
     assert "version" not in policy_from(value)
     assert "action_ref" not in policy_from(value)
+    assert "action_ref" not in value
+
+
+@pytest.mark.parametrize("legacy_ref", ["a" * 40, "main", "a" * 39, None, False, {"sha": "old"}])
+def test_action_ref_is_optional_and_ignored_without_mutating_input(legacy_ref):
+    value = config()
+    assert "action_ref" not in value
+    assert validate_config(value) == value
+    legacy = {**value, "action_ref": legacy_ref}
+    assert validate_config(legacy) == value
+    assert legacy["action_ref"] == legacy_ref
 
 
 def test_publication_defaults_and_combinations():
@@ -43,7 +54,6 @@ def test_publication_defaults_and_combinations():
 def test_required_fields_unknown_keys_and_invalid_types():
     for section, key in (
         (None, "version"),
-        (None, "action_ref"),
         (None, "review"),
         ("review", "minimum_approvals"),
         ("review", "require_resolved_threads"),
@@ -61,8 +71,6 @@ def test_required_fields_unknown_keys_and_invalid_types():
     mutations = [
         ("version", True),
         ("version", 1),
-        ("action_ref", "main"),
-        ("action_ref", "a" * 39),
         ("ci", []),
         ("review", None),
         ("publication", []),

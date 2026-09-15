@@ -10,8 +10,8 @@ import pytest
 from pr_merge_readiness import runtime
 from pr_merge_readiness.cli import main
 from pr_merge_readiness.config import ACTION_REPOSITORY
-from tests.test_config import config, config_text
-from tests.test_support import BASE, HEAD, pr_event
+from tests.test_config import config_text
+from tests.test_support import ACTION_SHA, BASE, HEAD, pr_event
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def context(tmp_path, monkeypatch):
         "GITHUB_OUTPUT": str(tmp_path / "outputs"),
         "RUNNER_TEMP": str(tmp_path),
         "PMR_SOURCE_REPOSITORY": ACTION_REPOSITORY,
-        "PMR_SOURCE_REF": config()["action_ref"],
+        "PMR_SOURCE_REF": ACTION_SHA,
     }
     with patch.dict(os.environ, env, clear=True), patch.object(runtime, "GitHub", return_value=api):
         yield api, blob, event, tmp_path / "outputs"
@@ -164,8 +164,8 @@ def test_run_does_not_accept_overrides_for_event_derived_inputs(context, key):
     api.request.assert_not_called()
 
 
-@pytest.mark.parametrize("reference", ["main", "v0.3.0", "", "a" * 40])
-def test_run_verifies_the_actual_source_and_config_pin(context, reference):
+@pytest.mark.parametrize("reference", ["main", "v0.3.0", "", "a" * 39])
+def test_run_requires_the_actual_source_to_be_a_full_sha(context, reference):
     api, blob, _, _ = context
     api.request.side_effect = [{"default_branch": "trunk"}, {"object": {"sha": BASE}}, blob]
     os.environ["PMR_SOURCE_REF"] = reference

@@ -1,4 +1,4 @@
-# v0.4.0 のバイナリ同梱 SHA。workflow の uses も同じ SHA に指定します。
+# v0.4.0 を使用中のため action_ref を維持。次回リリースへの更新後に削除できます。
 version = 2
 action_ref = "107e80a91574e277ea3c13e41aeff7710cae77e2"
 

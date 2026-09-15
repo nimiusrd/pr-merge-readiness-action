@@ -27,7 +27,6 @@ class PublicationConfig(TypedDict):
 
 class Config(TypedDict):
     version: Literal[2]
-    action_ref: str
     review: ReviewConfig
     publication: PublicationConfig
 

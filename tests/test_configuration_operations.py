@@ -10,8 +10,8 @@ import pytest
 from pr_merge_readiness import runtime
 from pr_merge_readiness.cli import main
 from pr_merge_readiness.config import ACTION_REPOSITORY
-from tests.test_config import config, config_text
-from tests.test_support import BASE, pr_event
+from tests.test_config import config_text
+from tests.test_support import ACTION_SHA, BASE, pr_event
 
 
 def blob(text):
@@ -34,8 +34,8 @@ def context(tmp_path, monkeypatch):
         "GITHUB_EVENT_PATH": str(event),
         "GITHUB_OUTPUT": str(tmp_path / "outputs"),
         "PMR_SOURCE_REPOSITORY": ACTION_REPOSITORY,
-        "PMR_SOURCE_REF": config()["action_ref"],
-        "PMR_ACTION_REF": config()["action_ref"],
+        "PMR_SOURCE_REF": ACTION_SHA,
+        "PMR_ACTION_REF": ACTION_SHA,
         "PMR_CONFIG_PATH": ".github/config.toml",
     }
     api = Mock(repository="sample-org/project", prefix="/repos/sample-org/project")
@@ -115,13 +115,13 @@ def test_prepare_rejects_conflicting_or_malformed_actual_manual_inputs(context, 
     assert not output.exists()
 
 
-@pytest.mark.parametrize("mutation", ["valid", "unknown-key", "wrong-action", "permission-denied"])
+@pytest.mark.parametrize("mutation", ["valid", "unknown-key", "no-action-ref", "permission-denied"])
 def test_validate_config_reads_only_explicit_proposal_data(context, mutation):
     api, text, event, output = context
     if mutation == "unknown-key":
         text = "unknown = true\n" + text
-    if mutation == "wrong-action":
-        text = text.replace(config()["action_ref"], "c" * 40)
+    if mutation == "no-action-ref":
+        text = "\n".join(line for line in text.splitlines() if not line.startswith("action_ref ="))
     api.request.return_value = blob(text)
     if mutation == "permission-denied":
         api.request.side_effect = ValueError("HTTP 403")
@@ -131,7 +131,7 @@ def test_validate_config_reads_only_explicit_proposal_data(context, mutation):
         patch.object(runtime.publish, "GitHub") as writer,
         patch.object(runtime, "observe") as observe,
     ):
-        if mutation == "valid":
+        if mutation in {"valid", "no-action-ref"}:
             assert runtime.run_action() == 0
             assert output.read_text() == f"config-sha={BASE}\n"
         else:

@@ -14,8 +14,8 @@ import pytest
 from pr_merge_readiness.artifacts import provenance
 from pr_merge_readiness.config import ACTION_REPOSITORY
 from pr_merge_readiness.evaluate import assess
-from tests.test_config import ROOT, config, config_text
-from tests.test_support import BASE, facts, policy, pr_event
+from tests.test_config import ROOT, config_text
+from tests.test_support import ACTION_SHA, BASE, facts, policy, pr_event
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ def test_binary_skips_excluded_pr_without_api_or_python(binary, tmp_path, isolat
         "GITHUB_EVENT_NAME": "pull_request",
         "GITHUB_EVENT_PATH": str(event_path),
         "GITHUB_OUTPUT": str(output),
-        "PMR_SOURCE_REF": config()["action_ref"],
+        "PMR_SOURCE_REF": ACTION_SHA,
         "PMR_SOURCE_REPOSITORY": ACTION_REPOSITORY,
     }
     invoke(binary, tmp_path, isolated, "action", env=env)
@@ -115,12 +115,16 @@ def test_binary_skips_excluded_pr_without_api_or_python(binary, tmp_path, isolat
     invoke(binary, tmp_path, isolated, "action", env={**env, "PMR_SOURCE_REF": "main"}, code=1)
 
 
-def test_binary_reads_config_over_http(binary, tmp_path, isolated):
+@pytest.mark.parametrize("legacy_config", [True, False])
+def test_binary_reads_config_over_http(binary, tmp_path, isolated, legacy_config):
+    text = config_text()
+    if not legacy_config:
+        text = "\n".join(line for line in text.splitlines() if not line.startswith("action_ref ="))
     body = json.dumps(
         {
             "type": "file",
             "encoding": "base64",
-            "content": base64.b64encode(config_text().encode()).decode(),
+            "content": base64.b64encode(text.encode()).decode(),
         }
     ).encode()
     paths = []
@@ -150,7 +154,7 @@ def test_binary_reads_config_over_http(binary, tmp_path, isolated):
                     "GH_TOKEN": "test-token",
                     "PMR_OPERATION": "validate-config",
                     "PMR_CONFIG_SHA": BASE,
-                    "PMR_SOURCE_REF": config()["action_ref"],
+                    "PMR_SOURCE_REF": ACTION_SHA,
                     "PMR_SOURCE_REPOSITORY": ACTION_REPOSITORY,
                 },
             )

@@ -1,6 +1,6 @@
 # 1回の Action 呼出しで処理する
 
-[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、レビュー条件を合わせてください。v0.4.0 の配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` は、Python 同梱バイナリ、`pull_request` の自動観測、fork・Dependabot 除外に対応しています。既存の利用側は、起動条件と両方の SHA をまとめて更新してください。
+[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーし、レビュー条件を合わせてください。workflow の `uses:` はリリースタグが指す40桁 SHA に固定します。現在の例は v0.4.0 の配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` を使用するため、この版で必要な TOML の `action_ref` も残しています。次回リリースから設定側の指定は不要です。
 
 通常の workflow から Composite Action を1回呼び出します。呼び出し側は起動条件、手動入力、runner、timeout、権限、concurrency を管理し、処理の分岐・順序・レポート保存を Action に任せます。checkout、再利用可能 workflow、生成コマンドは不要です。
 
@@ -16,7 +16,7 @@
 | Run workflow、番号なし | 全 open PR を観測 → 保存 → Check |
 | Run workflow、`update-labels = true` | 全 open PR を観測 → 保存 → Check → ラベル |
 
-`labels = "auto"` は次回リリース向けの機能です。現在の v0.4.0 に固定した利用例ではラベルは手動更新です。[自動ラベルへの移行](#自動ラベルへの移行)に従い、対応リリースの SHA と設定を同時に更新してください。
+`labels = "auto"` は v0.5.0 以降の機能です。現在の v0.4.0 に固定した利用例ではラベルは手動更新です。[自動ラベルへの移行](#自動ラベルへの移行)に従い、対応リリースの SHA と設定を同時に更新してください。
 
 通常 PR は、作成元とマージ先が同じリポジトリで、作成者が `dependabot[bot]` 以外の PR を指します。PR 状態変更には `pull_request` を使い、タイトル・本文だけの編集は処理を省略します。承認イベントと日次実行は起動条件にしません。手動ラベル更新と PR 番号指定は併用できません。Check が無効ならその公開段階を省略します。CI の開始・完了・再実行では起動しません。競合中の PR では `pull_request` が起動しないため、Run workflow で再評価します。レビュー・スレッド解決・base ブランチへの新しい push をすぐに反映する場合も Run workflow を使います。[GitHub の起動条件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)を参照してください。
 
@@ -28,7 +28,7 @@ open PR の競合判定が `UNKNOWN` の場合、観測開始時と最終確認�
 
 ## 設定と権限
 
-運用時は default branch の設定 SHA を一度確定し、後続処理で同じ設定を使います。途中で default branch が進んでも再解決しません。設定・レポートの出所と Action の実ソースの SHA を照合します。通常 PR では最初に PR head の TOML を検証し、不正なら観測・公開へ進みません。有効な提案でも、観測・公開の policy は default branch から別に取得します。PR のソースコードは実行しません。
+運用時は default branch の設定 SHA を一度確定し、後続処理で同じ設定を使います。途中で default branch が進んでも再解決しません。レポートの出所には実行中の Action SHA と設定コミット SHA を別々に記録し、公開時に両方の一致を確認します。次回リリースから、TOML の `action_ref` は参照せず、設定の互換性は `version` と各項目で検証します。通常 PR では最初に PR head の TOML を検証し、不正なら観測・公開へ進みません。有効な提案でも、観測・公開の policy は default branch から別に取得します。PR のソースコードは実行しません。
 
 `pull_request` の観測開始時・終了時に、API の head SHA と設定を検証したイベントの head SHA が一致することを要求します。不一致なら観測全体を失敗として記録し、PR の判定レポート・Check・ラベルを公開しません。観測後に追加 push された場合も、Check・ラベル公開時の head SHA がイベントと異なれば公開を省略します。古いイベントの検証結果を新しい head に流用せず、新しいイベントで再評価します。
 
@@ -65,24 +65,32 @@ bash /absolute/path/to/release-checkout/run-binary.sh validate-config \
   --config .github/pr-merge-readiness.toml
 ```
 
-Action 更新時は TOML の `action_ref` と workflow の `uses:` を同じ公開済み SHA にまとめて変更します。明示した `action-ref` 入力がある場合はそれも更新します。
+Action 更新時は workflow の `uses:` を新しい公開済み SHA に変更します。明示した Action 入力の `action-ref` がある場合はそれも更新するか、省略して実際の参照から取得させます。次回リリースから TOML の `action_ref` の更新は不要です。
 
 バイナリ版では、[Release workflow が作る配布用コミット](releases.md)の SHA を使用してください。現在の利用例は v0.4.0 の配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` に固定しています。ソース checkout で開発する場合は、uv で Python 3.14 を用意して `bash run.sh validate-config --config <path>` を使用できます。
 
-Action SHA を更新する PR では、PR head の TOML 検証後、default branch に残る旧 `action_ref` と新しい実行 SHA の照合が `config/action SHA mismatch` で失敗します。この段階では観測・Check 公開へ進みません。移行 PR は通常の必須 CI とレビューで検証し、マージ後に default branch の Run workflow で観測・参考 Check を確認してください。参考用の readiness job を必須 Check として登録しないでください。
-
-移行前に作成した既存 PR も、PR head の TOML が旧 `action_ref` のままなら新しい Action の検証に失敗します。default branch を取り込み、workflow と TOML を新しい SHA に揃えてから自動観測を再実行してください。それまでの観測には default branch の Run workflow を使用できます。
+公開済み v0.4.0 / v0.5.0 は TOML の `action_ref` と実行 SHA を照合するため、更新 PR では default branch の旧値によって `config/action SHA mismatch` になる場合があります。次回リリースではこの照合を削除し、設定が有効なら PR head・default branch に旧値が残っていても観測・公開へ進みます。参考用の readiness job を必須 Check として登録しないでください。
 
 同じ Check・ラベルを更新する既存 writer から切り替える場合は、実行終了を確認してから入口を一つの変更で切り替えます。切り戻しは workflow と TOML を同時に revert します。旧 artifact の変換は行いません。
 
 ## 公開後の移行
 
+### 設定と Action の SHA の分離
+
+この変更は次回リリースで提供します。設定 version は 2 のままです。
+
+1. この変更を含むリリースの公開後、workflow の `uses:` をリリースタグが指す配布用コミット SHA に更新します。実行中の Action のリポジトリとフル SHA は引き続き検証します。
+2. TOML の `action_ref` は削除できます。default branch や既存 PR に残っていても値は読み捨てるため、同時更新は不要です。運用設定と提案設定の両方で省略を受け付けます。
+3. 更新 PR で観測・参考 Check が成功し、運用設定が `labels = "auto"` なら当該 PR のラベルが更新されることを確認します。レポートには新しい Action SHA と観測時の設定コミット SHA が記録されます。
+
+v0.4.0 / v0.5.0 の `uses:` を残したまま先に `action_ref` を削除すると、そのバイナリの設定検証に失敗します。まず対応リリースへ更新してください。旧 Action を使う既存 PR は workflow の更新を取り込む必要があります。切り戻す場合は旧 Action が必要とする `action_ref` も戻します。
+
 ### 自動ラベルへの移行
 
-`labels = "auto"` は次回リリースで提供します。v0.4.0 の同梱バイナリはこの値を拒否するため、現在の `.github/` と利用例は `"manual"` を維持しています。
+`labels = "auto"` は v0.5.0 以降で使用できます。v0.4.0 の同梱バイナリはこの値を拒否するため、現在の `.github/` と利用例は `"manual"` を維持しています。
 
 1. [Release workflow](releases.md)でこの変更を含むバイナリを公開し、リリースタグが指す配布用コミットの40桁 SHA を取得します。
-2. 利用側の workflow の `uses:` と TOML の `action_ref` をその SHA に揃え、`[publication]` の `labels` を `"auto"` に変更します。`pull_request` の起動条件・権限・concurrency は完全な workflow 例のまま使えます。手動実行だけの workflow には、完全な例の `pull_request` 起動条件も追加します。
+2. 利用側の workflow の `uses:` をその SHA に固定し、`[publication]` の `labels` を `"auto"` に変更します。v0.5.0 では TOML の `action_ref` も同じ SHA に揃え、次回リリース以降では省略します。`pull_request` の起動条件・権限・concurrency は完全な workflow 例のまま使えます。手動実行だけの workflow には、完全な例の `pull_request` 起動条件も追加します。
 3. default branch への反映後、通常 PR の作成・追加 push で当該 PR に判定ラベルが付き、終了時に管理ラベルが除去されることを確認します。移行 PR と既存 PR の SHA 不一致は「個別 operation と更新」の扱いに従います。
 4. 既存 open PR をまとめて更新する場合は、default branch の Run workflow で PR 番号を空にし、`update-labels = true` を指定します。
 
@@ -91,7 +99,7 @@ Action SHA を更新する PR では、PR head の TOML 検証後、default bran
 ### バイナリ版への移行
 
 1. Release workflow の公開完了後、リリースタグが指す**配布用コミット**の40桁 SHA を取得します。今後のリリースは検証済みバイナリを main に反映したコミットへタグを付けます。ビルド開始時のソース SHA ではなく、公開後のタグが指す SHA を使用します。
-2. `uses:` と TOML の `action_ref` を同じ配布用 SHA に変更します。イベント、権限、設定・レポートの schema は変わりません。
+2. `uses:` を配布用 SHA に変更します。TOML の `action_ref` は、v0.4.0 / v0.5.0 では同じ SHA を指定し、次回リリース以降では省略します。イベント、権限、設定・レポートの schema は変わりません。
 3. マージ後、default branch の Run workflow で観測・artifact 保存・参考 Check を確認します。uv・Python のセットアップ step がなく、同梱バイナリが動くことを確認します。移行 PR の SHA 不一致は「個別 operation と更新」の扱いに従います。
 
 Python と uv を利用側に用意する必要はありません。Linux x64 / arm64 の対応 runner を指定してください。
@@ -100,7 +108,7 @@ Python と uv を利用側に用意する必要はありません。Linux x64 / 
 
 このリポジトリの `.github/` と利用例は、公開済み実装 `107e80a91574e277ea3c13e41aeff7710cae77e2` と `pull_request` を使用しています。従来の `pull_request_target` を使っている利用側は、以下を同じ変更で反映します。
 
-1. `uses:` と TOML の `action_ref` を、新実装を含む同じ公開済み40桁 SHA に更新します。
+1. `uses:` を対応リリースの公開済み40桁 SHA に更新します。TOML の `action_ref` は「設定と Action の SHA の分離」の対応版に応じて扱います。
 2. `pull_request_target` を削除し、`pull_request` に opened／reopened／synchronize／edited／ready_for_review／converted_to_draft／closed を設定します。既存の `pull_request.paths` は外して通常 PR 全体を対象にします。`push.paths` と手動入力は維持します。
 3. マージ後に通常 PR の更新で参考 Check が更新され、fork・Dependabot では省略されることを確認します。競合中の通常 PR は手動実行で確認します。移行 PR 自体の SHA 不一致については「個別 operation と更新」を参照してください。
 4. Run workflow の `update-labels = true` で同期し、fork・Dependabot に残る管理ラベルを除去します。
@@ -111,7 +119,7 @@ Python と uv を利用側に用意する必要はありません。Linux x64 / 
 
 設定 version 1 の旧実装から切り替える利用側は、上記と合わせて以下を反映してください。version 2 の設定を旧 Action SHA と組み合わせると設定検証に失敗します。
 
-1. version 2 対応の公開済み40桁 SHA を確定し、`uses:` と TOML の `action_ref` に同じ値を設定します。
+1. version 2 対応の公開済み40桁 SHA を確定し、`uses:` に設定します。TOML の `action_ref` は「設定と Action の SHA の分離」の対応版に応じて扱います。
 2. TOML を version 2 にし、`[ci]` と `[[ci.required_checks]]` を削除します。
 3. workflow の `workflow_run` トリガーと `actions: read`・`statuses: read` を削除します。通常 PR の状態変更は `pull_request` で直接観測されます。`mark` operation は廃止しています。
 4. workflow と設定を同時に反映し、Run workflow の `update-labels = true` で全 open PR を同期します。CI を含む旧ラベルの付与は open／closed PR から除去されます。他のラベルと旧ラベルのリポジトリ内の定義は削除しません。

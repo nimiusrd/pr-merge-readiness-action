@@ -33,7 +33,7 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 2. Actions の **Release → Run workflow** で main を選び、未使用の `vMAJOR.MINOR.PATCH` を入力します。タグ名は Action の配布版を識別します。Python パッケージを PyPI に公開する処理はありません。
 3. `build` job が source のテスト・静的検査、バイナリのビルド・テストを両 CPU で実行します。成功したバイナリと checksum を同じ run の artifact として保存します。
 4. `publish` job が main の先端とビルド対象のソース SHA の一致を確認し、同じ run の artifact だけを一時ディレクトリに取得します。checksum を検証し、`dist/` の2つのバイナリと checksum を置き換えます。変更があればソースコミットを親とする**配布用コミット**を作り、main の更新とそのコミットを指すタグの作成を atomic push で同時に公開してから、GitHub Release を作成します。バイナリと checksum が既存の内容と同じ場合は、現在の main コミットにタグを付けます。
-5. リリースノートの配布用コミット SHA を確認し、利用側の `uses:` と TOML の `action_ref` を同じ40桁 SHA に変更します。このリポジトリ自身の `.github/`・利用例・README と、利用側リポジトリの固定 SHA も更新します。[移行時の確認](workflow.md#バイナリ版への移行)に従ってマージ後の手動観測を確認します。
+5. リリースノートの配布用コミット SHA を確認し、利用側の `uses:` をその40桁 SHA に変更します。次回リリースから TOML の `action_ref` は不要です。このリポジトリ自身の `.github/`・利用例・README と、利用側リポジトリの固定 SHA も更新し、旧バイナリ向けに残していた `action_ref` を削除します。[設定と Action の SHA の分離](workflow.md#設定と-action-の-sha-の分離)に従って更新 PR とマージ後の手動観測を確認します。
 
 ソースコミットと配布用コミットはどちらも main の履歴に残ります。リリースノートにはビルド対象のソース SHA と公開した配布用 SHA を記載します。**Action にはリリースタグが指す40桁 SHA を指定してください。** リリース後の main にはソースだけを変更するコミットも入るため、任意の main の SHA では同梱バイナリとソースの対応を保証できません。`run.sh` はソースから動かす開発用 CLI として残します。
 

@@ -3,6 +3,7 @@
 HEAD = "a" * 40
 BASE = "b" * 40
 MERGE = "c" * 40
+ACTION_SHA = "d" * 40
 
 
 def pr_event(action="opened"):

@@ -1,4 +1,4 @@
-# uses と TOML の action_ref を同じ40桁 SHA に固定します。
+# uses をリリースタグが指す40桁 SHA に固定します。
 name: PR Merge Readiness
 
 on:
