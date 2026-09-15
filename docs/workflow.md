@@ -75,7 +75,7 @@ Action SHA を更新する PR では、PR head の TOML 検証後、default bran
 
 ### バイナリ版への移行
 
-1. Release workflow の公開完了後、リリースノートに記載された**配布用コミット**の40桁 SHA を取得します。main のソースコミットとは異なります。
+1. Release workflow の公開完了後、リリースタグが指す**配布用コミット**の40桁 SHA を取得します。今後のリリースは検証済みバイナリを main に反映したコミットへタグを付けます。ビルド開始時のソース SHA ではなく、公開後のタグが指す SHA を使用します。
 2. `uses:` と TOML の `action_ref` を同じ配布用 SHA に変更します。イベント、権限、設定・レポートの schema は変わりません。
 3. マージ後、default branch の Run workflow で観測・artifact 保存・参考 Check を確認します。uv・Python のセットアップ step がなく、同梱バイナリが動くことを確認します。移行 PR の SHA 不一致は「個別 operation と更新」の扱いに従います。
 
