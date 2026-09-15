@@ -229,6 +229,8 @@ def run_action() -> int:
         api, values["config-path"], values["config-sha"], values["action-ref"]
     )
     if operation == "prepare":
+        if automatic:
+            output({"validated-head": proposal_sha})
         return prepare(config, config_sha, automatic=automatic)
     if operation == "validate-config":
         if automatic:
@@ -240,14 +242,13 @@ def run_action() -> int:
     policy = policy_from(config)
     event = (
         {}
-        if publishing and os.environ.get("GITHUB_EVENT_NAME") != "pull_request"
+        if publishing
         else json.loads(Path(values["event-path"] or os.environ["GITHUB_EVENT_PATH"]).read_text())
     )
-    expected_head = (
-        sha(event["pull_request"]["head"]["sha"])
-        if os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
-        else None
-    )
+    # 自動runが実際に検証したSHAだけを内部step間で引き継ぐ。
+    # 個別operationでは、起動イベントのPRを全レポートへ一律に適用しない。
+    validated_head = os.environ.get("PMR_VALIDATED_HEAD", "")
+    expected_head = sha(validated_head) if validated_head else None
     run_id, attempt = os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"]
     run_url = f"https://github.com/{api.repository}/actions/runs/{positive(run_id)}/attempts/{positive(attempt)}"
     name = artifact_name(run_id, attempt)

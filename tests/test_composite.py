@@ -411,6 +411,38 @@ def test_pr_head_change_never_publishes_with_only_previous_proposal_validated(
         assert not reader.paths  # headの一致を確認する前に変更内容やレビューを収集しない。
 
 
+def test_explicit_check_publication_in_pr_workflow_can_publish_multiple_prs(environment):
+    directory, event, reader, checks, _, _ = environment
+    event.write_text('{"inputs":{}}')
+    assert Composite(directory).run() == 0
+    report_dir = directory / "pr-merge-readiness-42-2"
+    second = json.loads((report_dir / "pr-1.json").read_text())
+    other_head = "d" * 40
+    second["observations"]["pr"].update(number=2, head_sha=other_head)
+    (report_dir / "pr-2.json").write_text(json.dumps(second))
+    manifest = json.loads((report_dir / "manifest.json").read_text())
+    manifest["reports"].append("pr-2.json")
+    (report_dir / "manifest.json").write_text(json.dumps(manifest))
+    checks.prs[2]["head"]["sha"] = other_head
+    checks.prs[2]["base"]["ref"] = reader.state["baseRefName"]
+    checks.checks.clear()
+    checks.writes.clear()
+    os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+    os.environ["PMR_VALIDATED_HEAD"] = HEAD  # 個別Action呼出しには内部stepの固定値を持ち込まない。
+    event.write_text(json.dumps(pr_event()))
+    action = Composite(
+        directory,
+        {
+            "operation": "publish-checks",
+            "config-sha": BASE,
+            "report-dir": str(report_dir),
+            "artifact-name": "pr-merge-readiness-42-2",
+        },
+    )
+    assert action.run() == 0
+    assert {body["head_sha"] for _, body, _ in checks.writes} == {HEAD, other_head}
+
+
 @pytest.mark.parametrize(
     "state,expected",
     [({"isDraft": True}, "WAITING"), ({"mergeable": "CONFLICTING"}, "HUMAN_REVIEW_REQUIRED")],

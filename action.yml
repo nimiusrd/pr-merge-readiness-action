@@ -68,6 +68,7 @@ runs:
         PMR_SOURCE_REF: ${{ github.action_ref }}
         PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
         PMR_OPERATION: ${{ inputs.operation }}
+        PMR_VALIDATED_HEAD: ''
         PMR_ACTION_REF: ${{ inputs.action-ref }}
         PMR_CONFIG_PATH: ${{ inputs.config-path }}
         PMR_CONFIG_SHA: ${{ inputs.config-sha }}
@@ -97,6 +98,7 @@ runs:
         PMR_SOURCE_REF: ${{ github.action_ref }}
         PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
         PMR_OPERATION: ${{ steps.run.outputs.operation }}
+        PMR_VALIDATED_HEAD: ${{ steps.run.outputs.validated-head }}
         PMR_ACTION_REF: ${{ inputs.action-ref }}
         PMR_CONFIG_PATH: ${{ inputs.config-path }}
         PMR_CONFIG_SHA: ${{ steps.run.outputs.config-sha }}
@@ -125,6 +127,7 @@ runs:
         PMR_SOURCE_REF: ${{ github.action_ref }}
         PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
         PMR_OPERATION: publish-checks
+        PMR_VALIDATED_HEAD: ${{ steps.run.outputs.validated-head }}
         PMR_PR_NUMBER: ''
         PMR_EVENT_PATH: ''
         PMR_ACTION_REF: ${{ inputs.action-ref }}

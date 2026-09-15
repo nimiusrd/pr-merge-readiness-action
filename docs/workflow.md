@@ -52,6 +52,8 @@ Action が今回の観測を `pr-merge-readiness-RUN_ID-ATTEMPT` に30日保存�
 
 `operation` を明示すると、`prepare`・`validate-config`・`observe`・`publish-checks`・`publish-labels` を個別に利用できます。read-only の観測だけを行う用途などで使います。個別利用では呼び出し側が同じ設定 SHA の引き継ぎ、artifact 保存、公開順序、限定権限を管理します。自動保存は既定の `run` だけが行います。
 
+検証済み head への固定は、自動 `run` 内の観測・Check 公開に適用します。個別の `publish-checks` は各レポートの PR を対象とし、`pull_request` から呼んでもイベント元 PR の head に一律固定しません。
+
 ローカルで TOML を検証する場合は、固定版 Action の CLI を使用できます。
 
 ```sh

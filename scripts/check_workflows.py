@@ -26,6 +26,9 @@ def check_action_flow(action: dict[str, Any]) -> None:
     for name in ("execute", "checks", "labels"):
         assert steps[name]["env"]["PMR_CONFIG_SHA"] == "${{ steps.run.outputs.config-sha }}"
         assert steps[name]["env"]["PMR_REPORT_DIR"] == "${{ steps.run.outputs.report-dir }}"
+    assert steps["run"]["env"]["PMR_VALIDATED_HEAD"] == ""
+    for name in ("execute", "checks"):
+        assert steps[name]["env"]["PMR_VALIDATED_HEAD"] == "${{ steps.run.outputs.validated-head }}"
     assert "steps.run.outcome == 'failure'" in steps["preparation"]["if"]
     assert "always()" in steps["observations"]["if"]
     assert "steps.execute.outcome == 'failure'" in steps["observations"]["if"]
