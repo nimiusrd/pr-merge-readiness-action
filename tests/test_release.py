@@ -98,6 +98,9 @@ def test_release_pins_verified_binaries_without_advancing_main(release, tmp_path
     assert git("rev-parse", commit + "^") == env["GITHUB_SHA"]
     assert git("--git-dir=" + str(remote), "rev-parse", "refs/heads/main") == env["GITHUB_SHA"]
     assert git("--git-dir=" + str(remote), "rev-parse", "refs/tags/v1.2.3") == commit
+    assert (
+        git("--git-dir=" + str(remote), "rev-parse", "refs/heads/codex/releases/v1.2.3") == commit
+    )
     assert git("diff", "--name-only", env["GITHUB_SHA"], commit).splitlines() == [
         "dist/linux-arm64/SHA256SUMS",
         "dist/linux-arm64/pr-merge-readiness",
@@ -125,12 +128,23 @@ def test_release_pins_verified_binaries_without_advancing_main(release, tmp_path
     ]
     assert env["GITHUB_SHA"] in calls[-1]["notes"]
     assert commit in calls[-1]["notes"]
+    assert "codex/releases/v1.2.3" in calls[-1]["notes"]
     assert (tmp_path / "summary").read_text() == calls[-1]["notes"]
 
 
 @pytest.mark.parametrize(
     "failure",
-    ["version", "branch", "head", "dirty", "existing-tag", "remote", "checksum", "missing"],
+    [
+        "version",
+        "branch",
+        "head",
+        "dirty",
+        "existing-tag",
+        "existing-release-branch",
+        "remote",
+        "checksum",
+        "missing",
+    ],
 )
 def test_release_refuses_invalid_inputs_before_publishing(release, tmp_path, failure):
     source, remote, env, git, publish = release
@@ -145,6 +159,8 @@ def test_release_refuses_invalid_inputs_before_publishing(release, tmp_path, fai
     elif failure == "existing-tag":
         git("tag", "v1.2.3")
         git("push", "-q", "origin", "v1.2.3")
+    elif failure == "existing-release-branch":
+        git("push", "-q", "origin", "HEAD:refs/heads/codex/releases/v1.2.3")
     elif failure == "remote":
         git("remote", "set-url", "origin", str(tmp_path / "missing.git"))
     elif failure == "checksum":
@@ -158,9 +174,33 @@ def test_release_refuses_invalid_inputs_before_publishing(release, tmp_path, fai
     assert git("--git-dir=" + str(remote), "rev-parse", "refs/heads/main") == original
     tags = git("--git-dir=" + str(remote), "tag", "--list")
     assert tags == ("v1.2.3" if failure == "existing-tag" else "")
+    branches = git("--git-dir=" + str(remote), "for-each-ref", "--format=%(refname)", "refs/heads")
+    assert branches.splitlines() == (
+        ["refs/heads/codex/releases/v1.2.3", "refs/heads/main"]
+        if failure == "existing-release-branch"
+        else ["refs/heads/main"]
+    )
     log = tmp_path / "gh.jsonl"
     if log.exists():
         assert all(
             json.loads(line)["args"][:2] == ["run", "download"]
             for line in log.read_text().splitlines()
         )
+
+
+@pytest.mark.parametrize("rejected_ref", ["refs/heads/codex/releases/v1.2.3", "refs/tags/v1.2.3"])
+def test_release_pushes_branch_and_tag_atomically(release, tmp_path, rejected_ref):
+    _, remote, env, git, publish = release
+    hook = remote / "hooks/update"
+    hook.write_text(f'#!/bin/sh\n[ "$1" != "{rejected_ref}" ]\n')
+    hook.chmod(0o755)
+    result = publish()
+    assert result.returncode != 0
+    assert "atomic" in result.stderr
+    assert git("--git-dir=" + str(remote), "show-ref").splitlines() == [
+        env["GITHUB_SHA"] + " refs/heads/main"
+    ]
+    calls = [
+        json.loads(line)["args"][:2] for line in (tmp_path / "gh.jsonl").read_text().splitlines()
+    ]
+    assert calls == [["run", "download"], ["run", "download"], ["auth", "setup-git"]]

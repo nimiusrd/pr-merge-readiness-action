@@ -1,6 +1,6 @@
 # 1回の Action 呼出しで処理する
 
-[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、レビュー条件を合わせてください。公開済み SHA `8354fe9105cbb98132dc8d68f3250a6978ccefd6` は、`pull_request` の自動観測と fork・Dependabot 除外に対応しています。既存の利用側は、起動条件と両方の SHA をまとめて更新してください。
+[完全な workflow 例](../examples/pr-merge-readiness.yml)と[最小設定](../examples/minimal.toml)を利用側の `.github` にコピーします。設定の `action_ref` と workflow の `uses:` を同じ40桁 SHA に固定し、レビュー条件を合わせてください。v0.4.0 の配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` は、Python 同梱バイナリ、`pull_request` の自動観測、fork・Dependabot 除外に対応しています。既存の利用側は、起動条件と両方の SHA をまとめて更新してください。
 
 通常の workflow から Composite Action を1回呼び出します。呼び出し側は起動条件、手動入力、runner、timeout、権限、concurrency を管理し、処理の分岐・順序・レポート保存を Action に任せます。checkout、再利用可能 workflow、生成コマンドは不要です。
 
@@ -63,7 +63,7 @@ bash /absolute/path/to/release-checkout/run-binary.sh validate-config \
 
 Action 更新時は TOML の `action_ref` と workflow の `uses:` を同じ公開済み SHA にまとめて変更します。明示した `action-ref` 入力がある場合はそれも更新します。
 
-バイナリ版では、[Release workflow が作る配布用コミット](releases.md)の SHA を使用してください。現在の利用例が固定する `8354fe9105cbb98132dc8d68f3250a6978ccefd6` は従来の uv 起動版です。ソース checkout で開発する場合は、uv で Python 3.14 を用意して `bash run.sh validate-config --config <path>` を使用できます。
+バイナリ版では、[Release workflow が作る配布用コミット](releases.md)の SHA を使用してください。現在の利用例は v0.4.0 の配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` に固定しています。ソース checkout で開発する場合は、uv で Python 3.14 を用意して `bash run.sh validate-config --config <path>` を使用できます。
 
 Action SHA を更新する PR では、PR head の TOML 検証後、default branch に残る旧 `action_ref` と新しい実行 SHA の照合が `config/action SHA mismatch` で失敗します。この段階では観測・Check 公開へ進みません。移行 PR は通常の必須 CI とレビューで検証し、マージ後に default branch の Run workflow で観測・参考 Check を確認してください。参考用の readiness job を必須 Check として登録しないでください。
 
@@ -83,7 +83,7 @@ Python と uv を利用側に用意する必要はありません。Linux x64 / 
 
 ### pull_request への移行
 
-このリポジトリの `.github/` と利用例は、公開済み実装 `8354fe9105cbb98132dc8d68f3250a6978ccefd6` と `pull_request` を使用しています。従来の `pull_request_target` を使っている利用側は、以下を同じ変更で反映します。
+このリポジトリの `.github/` と利用例は、公開済み実装 `107e80a91574e277ea3c13e41aeff7710cae77e2` と `pull_request` を使用しています。従来の `pull_request_target` を使っている利用側は、以下を同じ変更で反映します。
 
 1. `uses:` と TOML の `action_ref` を、新実装を含む同じ公開済み40桁 SHA に更新します。
 2. `pull_request_target` を削除し、`pull_request` に opened／reopened／synchronize／edited／ready_for_review／converted_to_draft／closed を設定します。既存の `pull_request.paths` は外して通常 PR 全体を対象にします。`push.paths` と手動入力は維持します。
@@ -92,9 +92,9 @@ Python と uv を利用側に用意する必要はありません。Linux x64 / 
 
 旧 SHA のまま起動条件だけ変更すると、`pull_request` は設定検証だけで終了し、自動 Check 更新が止まります。設定・レポートの schema version は今回変更しません。
 
-### v0.4.0 からの移行
+### 設定 version 1 からの移行
 
-v0.4.0 から切り替える利用側は、上記と合わせて以下を反映してください。version 2 の設定を旧 Action SHA と組み合わせると設定検証に失敗します。
+設定 version 1 の旧実装から切り替える利用側は、上記と合わせて以下を反映してください。version 2 の設定を旧 Action SHA と組み合わせると設定検証に失敗します。
 
 1. version 2 対応の公開済み40桁 SHA を確定し、`uses:` と TOML の `action_ref` に同じ値を設定します。
 2. TOML を version 2 にし、`[ci]` と `[[ci.required_checks]]` を削除します。

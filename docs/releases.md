@@ -32,14 +32,16 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 1. 実装 PR を main にマージし、CI のソース検証と両 CPU のバイナリ検証の成功を確認します。
 2. Actions の **Release → Run workflow** で main を選び、未使用の `vMAJOR.MINOR.PATCH` を入力します。タグ名は Action の配布版を識別します。Python パッケージを PyPI に公開する処理はありません。
 3. `build` job が source のテスト・静的検査、バイナリのビルド・テストを両 CPU で実行します。成功したバイナリと checksum を同じ run の artifact として保存します。
-4. `publish` job が同じ run の artifact だけを取得し、checksum と実行権限を確認します。元のソースコミットを親として、2つのバイナリと checksum だけを加えた**配布用コミット**を作ります。このコミットに入力したタグを付け、タグと GitHub Release を公開します。main は進めません。
+4. `publish` job が同じ run の artifact だけを取得し、checksum と実行権限を確認します。元のソースコミットを親として、2つのバイナリと checksum だけを加えた**配布用コミット**を作ります。このコミットを指すタグと `codex/releases/<version>` ブランチを atomic push で同時に公開し、GitHub Release を作成します。片方の参照が拒否された場合は両方とも公開しません。main は進めません。
 5. リリースノートの配布用コミット SHA を確認し、利用側の `uses:` と TOML の `action_ref` を同じ40桁 SHA に変更します。このリポジトリ自身の `.github/`・利用例・README と、利用側リポジトリの固定 SHA も更新します。[移行時の確認](workflow.md#バイナリ版への移行)に従ってマージ後の手動観測を確認します。
 
-ソースコミットと配布用コミットの関係は、`ソース SHA → dist/ のみ追加した配布用 SHA ← リリースタグ` です。リリースノートには両方の SHA を残します。**Action には配布用 SHA を指定してください。** main や実装 PR には生成物を置かないため、ソース SHA を指定すると `Release binary missing` で失敗します。`run.sh` はソースから動かす開発用 CLI として残します。
+ソースコミットと配布用コミットの関係は、`ソース SHA → dist/ のみ追加した配布用 SHA ← リリースタグ・配布ブランチ` です。リリースノートには両方の SHA と配布ブランチを残します。**Action には配布用 SHA を指定してください。** main や実装 PR には生成物を置かないため、ソース SHA を指定すると `Release binary missing` で失敗します。`run.sh` はソースから動かす開発用 CLI として残します。
 
-ビルド job の token は読み取り専用、公開 job だけが `contents: write` と `actions: read` を持ちます。main 以外、無効なバージョン、既存タグ、checkout SHA の不一致、未コミット変更、artifact 不足・checksum 不一致は公開前に拒否します。
+配布ブランチはリリースごとに保持し、削除・移動・main へのマージをしません。タグだけで公開すると、GitHub が「どのブランチにも属していない」と警告するためです。v0.4.0 の配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` にも、同じ SHA を指す `codex/releases/v0.4.0` を追加しています。バイナリ・タグ・利用側の固定 SHA はそのままです。
 
-タグ公開後に GitHub Release の作成だけが失敗した場合、同じバージョンでの再実行は既存タグとして停止します。タグを動かさず、そのタグの配布用コミットと元の run の検証済み artifact を確認し、同じ配布物で Release 作成を完了してください。別のソースや再ビルドしたバイナリを同じタグへ上書きしません。
+ビルド job の token は読み取り専用、公開 job だけが `contents: write` と `actions: read` を持ちます。main 以外、無効なバージョン、既存タグ・配布ブランチ、checkout SHA の不一致、未コミット変更、artifact 不足・checksum 不一致は公開前に拒否します。
+
+タグ・配布ブランチの公開後に GitHub Release の作成だけが失敗した場合、同じバージョンでの再実行は既存参照として停止します。両方の参照を動かさず、その配布用コミットと元の run の検証済み artifact を確認し、同じ配布物で Release 作成を完了してください。別のソースや再ビルドしたバイナリを同じタグ・配布ブランチへ上書きしません。
 
 ## CLI と replay
 
