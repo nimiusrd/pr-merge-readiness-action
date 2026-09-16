@@ -290,13 +290,32 @@ def test_collects_only_metadata_and_preserves_observations():
         {"baseRefOid": "d" * 40},
         {"isDraft": True},
         {"reviewDecision": "CHANGES_REQUESTED"},
-        {"updatedAt": "2026-09-11T13:00:00Z"},
     ],
 )
-def test_head_base_draft_review_or_updated_at_changes_invalidate_collection(drift):
+def test_head_base_draft_or_review_changes_invalidate_collection(drift):
     api = FixtureAPI()
-    api.drift = drift
+    api.drift = {"updatedAt": "2026-09-11T13:00:00Z", **drift}
     assert assess(collect(api, 1), policy())["decision"] == "INSUFFICIENT_DATA"
+
+
+def test_updated_at_only_change_is_recorded_without_invalidating_observation():
+    api = FixtureAPI()
+    api.drift = {"updatedAt": "2026-09-11T12:01:00Z"}
+    facts = collect(api, 1)
+    assert facts["stable"]
+    assert facts["review_stable"]
+    assert facts["observation_changes"] == [
+        {
+            "group": "pr",
+            "identity": None,
+            "field": "updated_at",
+            "before": "2026-09-11T12:00:00Z",
+            "after": "2026-09-11T12:01:00Z",
+        }
+    ]
+    result = assess(facts, policy())
+    assert result["decision"] == "SHADOW_CONDITIONS_MET"
+    assert result["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
 
 
 def test_errors_cannot_be_confused_with_no_threads():
@@ -428,7 +447,6 @@ def test_ci_aggregate_changes_are_neither_requested_nor_recorded(state):
         {"isDraft": True},
         {"mergeable": "CONFLICTING"},
         {"mergeable": "UNKNOWN"},
-        {"updatedAt": "2026-09-11T12:01:00Z"},
         {"isDraft": True, "updatedAt": "2026-09-11T12:01:00Z", "mergeable": "UNKNOWN"},
     ],
 )

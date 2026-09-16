@@ -217,7 +217,7 @@ def pr_conditions(facts: Observations) -> list[Condition]:
         condition(
             "freshness",
             "pass" if boolean(facts["stable"], "stable") else "unknown",
-            "PR and reviews must agree in both samples",
+            "PR and reviews must agree in both samples (updated_at excluded)",
         )
         pr = facts["pr"]
         if pr["state"] not in {"OPEN", "CLOSED", "MERGED"}:

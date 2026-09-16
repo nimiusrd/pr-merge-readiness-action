@@ -84,6 +84,20 @@ def test_manual_single_pr_updates_labels_and_summary_in_one_call(context):
     assert all("state=closed" not in path for _, path, _ in writer.calls)
 
 
+@pytest.mark.parametrize("event_name", ["pull_request", "workflow_dispatch"])
+def test_updated_at_only_change_does_not_require_rerunning_action(context, event_name):
+    reader, writer, event, _, root = context
+    os.environ["GITHUB_EVENT_NAME"] = event_name
+    if event_name == "pull_request":
+        event.write_text(json.dumps(pr_event()))
+    reader.drift = {"updatedAt": "2026-09-11T12:01:00Z"}
+    assert main() == 0
+    assert writer.names() == [DECISION_LABELS["SHADOW_CONDITIONS_MET"]]
+    summary = (root / "summary").read_text()
+    assert "INSUFFICIENT_DATA" not in summary
+    assert "updated_at" in summary
+
+
 @pytest.mark.parametrize("inputs", [{}, None, {"pr-number": ""}])
 def test_all_open_sync_cleans_only_managed_labels_on_closed_prs(context, inputs):
     _, writer, event, _, _ = context
