@@ -18,41 +18,24 @@ def load(path: Path) -> dict[str, Any]:
 
 
 def check_action_flow(action: dict[str, Any]) -> None:
-    assert action["inputs"]["operation"]["default"] == "run"
-    assert action["inputs"]["action-ref"].get("required", "false") == "false"
-    steps = {step["id"]: step for step in action["runs"]["steps"] if "id" in step}
-    assert list(steps) == ["run", "preparation", "execute", "observations", "checks", "labels"]
-    assert len(action["runs"]["steps"]) == len(steps)
-    for name in ("run", "execute", "checks", "labels"):
-        assert steps[name]["run"] == 'bash "$PMR_ROOT/run-binary.sh" action'
-    assert "continue-on-error" not in steps["execute"]  # 観測失敗を Action 全体に残す。
-    for name in ("execute", "checks", "labels"):
-        assert steps[name]["env"]["PMR_CONFIG_SHA"] == "${{ steps.run.outputs.config-sha }}"
-        assert steps[name]["env"]["PMR_REPORT_DIR"] == "${{ steps.run.outputs.report-dir }}"
-    assert steps["run"]["env"]["PMR_VALIDATED_HEAD"] == ""
-    for name in ("execute", "checks"):
-        assert steps[name]["env"]["PMR_VALIDATED_HEAD"] == "${{ steps.run.outputs.validated-head }}"
-    assert "steps.run.outcome == 'failure'" in steps["preparation"]["if"]
-    assert "always()" in steps["observations"]["if"]
-    assert "steps.execute.outcome == 'failure'" in steps["observations"]["if"]
-    for name in ("preparation", "observations"):
-        step = steps[name]
-        assert step["uses"].startswith("actions/upload-artifact@")
-        assert step["with"]["retention-days"] == "30"
-        assert step["with"]["if-no-files-found"] == "error"
-    for name in ("checks", "labels"):
-        condition = steps[name]["if"]
-        assert "!cancelled()" in condition
-        assert "steps.run.outcome == 'success'" in condition
-        assert "steps.observations.outcome == 'success'" in condition
-    assert "steps.run.outputs.checks == 'true'" in steps["checks"]["if"]
-    assert "steps.run.outputs.labels == 'true'" in steps["labels"]["if"]
-    assert "steps.checks.outcome == 'success'" in steps["labels"]["if"]
-    assert "steps.run.outputs.checks == 'false'" in steps["labels"]["if"]
-    assert "steps.checks.outcome == 'skipped'" in steps["labels"]["if"]
+    assert set(action["inputs"]) == {"config-path", "token"}
+    assert set(action["outputs"]) == {"operation", "config-sha"}
+    assert action["runs"]["using"] == "composite"
+    assert len(action["runs"]["steps"]) == 1
+    step = action["runs"]["steps"][0]
+    assert step["id"] == "run"
+    assert step["run"] == 'bash "$PMR_ROOT/run-binary.sh" action'
+    assert "if" not in step and "continue-on-error" not in step
+    assert step["env"] == {
+        "PMR_ROOT": "${{ github.action_path }}",
+        "PMR_SOURCE_REF": "${{ github.action_ref }}",
+        "PMR_SOURCE_REPOSITORY": "${{ github.action_repository }}",
+        "PMR_CONFIG_PATH": "${{ inputs.config-path }}",
+        "GH_TOKEN": "${{ inputs.token }}",
+    }
 
 
-def check_runtime(workflow: dict[str, Any]) -> None:
+def check_runtime(workflow: dict[str, Any], *, legacy: bool = False) -> None:
     assert workflow["permissions"] == {}
     assert "concurrency" not in workflow
     assert set(workflow["jobs"]) == {"readiness"}
@@ -65,15 +48,18 @@ def check_runtime(workflow: dict[str, Any]) -> None:
         "cancel-in-progress": "false",
         "queue": "max",
     }
-    assert job["permissions"] == {
-        "contents": "read",
-        "checks": "write",
-        "pull-requests": "write",
-        "issues": "write",
-    }
+    expected = {"contents": "read", "pull-requests": "write", "issues": "write"}
+    if legacy:
+        expected["checks"] = "write"
+    assert job["permissions"] == expected
+    manual_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    assert set(manual_inputs) == ({"pr-number", "update-labels"} if legacy else {"pr-number"})
     assert len(job["steps"]) == 1
     assert set(job["steps"][0]) == {"uses"}
-    assert re.fullmatch(re.escape(ACTION_REPOSITORY) + r"@[0-9a-f]{40}", job["steps"][0]["uses"])
+    reference = job["steps"][0]["uses"]
+    assert re.fullmatch(re.escape(ACTION_REPOSITORY) + r"@[0-9a-f]{40}", reference) or (
+        not legacy and reference == ACTION_REPOSITORY + "@<RELEASE_COMMIT_SHA>"
+    )
 
 
 def main() -> None:
@@ -86,7 +72,7 @@ def main() -> None:
     assert project["tool"]["mypy"]["python_version"] == "3.14"
     assert project["tool"]["mypy"]["strict"] is True
     assert project["tool"]["ruff"]["target-version"] == "py314"
-    for name in ("operation", "checks", "labels", "pr-number", "config-sha"):
+    for name in action["outputs"]:
         assert action["outputs"][name]["value"] == "${{ steps.run.outputs." + name + " }}"
     example = load(ROOT / "examples/pr-merge-readiness.yml")
     check_runtime(example)
@@ -109,23 +95,37 @@ def main() -> None:
     snippets = re.findall(r"```yaml\n(.*?)\n```", (ROOT / "README.md").read_text(), re.DOTALL)
     assert len(snippets) == 1
     quickstart = yaml.load(snippets[0], Loader=yaml.BaseLoader)
-    assert set(quickstart["on"]) == {"workflow_dispatch"}
+    assert quickstart == example
     check_runtime(quickstart)
     workflows = [example, quickstart]
     for path in (ROOT / ".github/workflows").glob("*.yml"):
         workflow = load(path)
         workflows.append(workflow)
         if path.name == "pr-merge-readiness.yml":
-            validate_config(tomllib.loads((ROOT / ".github/pr-merge-readiness.toml").read_text()))
-            check_runtime(workflow)
-            assert workflow == example
+            # 対応バイナリ公開までは、稼働中のv0.5.1とversion 2を一緒に維持する。
+            settings = tomllib.loads((ROOT / ".github/pr-merge-readiness.toml").read_text())
+            legacy = settings["version"] == 2
+            if legacy:
+                assert workflow["jobs"]["readiness"]["steps"][0]["uses"] == (
+                    ACTION_REPOSITORY + "@38abf77191ca0801d10dd6bd8c9d387bdad4b911"
+                )
+            else:
+                validate_config(settings)
+            check_runtime(workflow, legacy=legacy)
+    templates = {id(example), id(quickstart)}
     steps = list(action["runs"]["steps"])
     for workflow in workflows:
         assert "on" in workflow and "jobs" in workflow
         assert not {"schedule", "workflow_call"} & workflow["on"].keys()
         for job in workflow["jobs"].values():
             assert "uses" not in job  # 全て通常の job から step として呼ぶ。
-            steps.extend(job["steps"])
+            for step in job["steps"]:
+                if (
+                    id(workflow) in templates
+                    and step.get("uses") == ACTION_REPOSITORY + "@<RELEASE_COMMIT_SHA>"
+                ):
+                    continue  # 未公開版の例だけに許す明示的なプレースホルダー。
+                steps.append(step)
     uv_setups = 0
     for step in steps:
         uses = step.get("uses", "")
@@ -133,7 +133,7 @@ def main() -> None:
             assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", uses), uses
         assert not uses.startswith("actions/setup-python@")
         if uses.startswith(ACTION_REPOSITORY + "@"):
-            assert step.get("with", {}).get("action-ref", uses.split("@")[1]) == uses.split("@")[1]
+            assert set(step.get("with", {})) <= set(action["inputs"])
         if uses.startswith("astral-sh/setup-uv@"):
             uv_setups += 1
             assert step["with"]["python-version"] == "3.14"

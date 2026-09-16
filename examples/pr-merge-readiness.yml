@@ -1,4 +1,4 @@
-# uses をリリースタグが指す40桁 SHA に固定します。
+# <RELEASE_COMMIT_SHA> を設定version 3対応リリースの40桁 SHA に置き換えてください。
 name: PR Merge Readiness
 
 on:
@@ -7,13 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       pr-number:
-        description: PR number (empty = all open PRs)
+        description: PR 番号（空欄なら全 open PR と終了済み PR のラベルを同期）
         type: string
         default: ''
-      update-labels:
-        description: Update labels for all open PRs
-        type: boolean
-        default: false
   push:
     paths: [.github/pr-merge-readiness.toml, .github/workflows/pr-merge-readiness.yml]
 
@@ -29,8 +25,7 @@ jobs:
       queue: max
     permissions:
       contents: read
-      checks: write
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@38abf77191ca0801d10dd6bd8c9d387bdad4b911 # v0.5.1
+      - uses: nimiusrd/pr-merge-readiness-action@<RELEASE_COMMIT_SHA>

@@ -15,7 +15,7 @@ def markdown(result: Assessment) -> str:
 
     facts = result["observations"]
     lines = [
-        "## Autonomous Merge Shadow",
+        "## PR Merge Readiness",
         "",
         "PR・レビュー・変更履歴の観測時点の仮判定です。CI の結果は GitHub Checks で確認してください。マージ許可・安全性の証明には使用しません。",
         "",
@@ -28,11 +28,6 @@ def markdown(result: Assessment) -> str:
         "対象: " + safe(facts.get("pr")),
         "",
         "変更量・形態（判定には加点しない）: " + safe(facts.get("change")),
-        "",
-        "評価器: " + safe(result.get("provenance", {}).get("evaluator")),
-        "設定: " + safe(result.get("provenance", {}).get("config")),
-        "",
-        "Policy SHA-256: " + safe(result["policy_sha256"]),
         "",
     ]
     if "stale_change_review_days" in result["policy"]:
@@ -48,7 +43,7 @@ def markdown(result: Assessment) -> str:
     lines.extend(["", "### 観測間の変化", ""])
     changes = facts.get("observation_changes")
     if changes is None:
-        lines.append("差分情報なし（再取得未完了、または旧形式の観測）。")
+        lines.append("差分情報なし（再取得未完了）。")
     elif not changes:
         lines.append("比較した正規化メタデータに変化はありません。")
     else:

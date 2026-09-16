@@ -1,4 +1,4 @@
-"""新しい観測・判定の型と実行時検証。旧 artifact は受理しない。"""
+"""観測・判定の型と実行時検証。"""
 
 from __future__ import annotations
 
@@ -10,37 +10,15 @@ Decision = Literal["SHADOW_CONDITIONS_MET", "WAITING", "HUMAN_REVIEW_REQUIRED", 
 ConditionStatus = Literal["pass", "waiting", "blocked", "unknown"]
 
 
-class ReviewConfig(TypedDict):
+class Policy(TypedDict):
     minimum_approvals: int
     require_resolved_threads: bool
     stale_change_review_days: int
 
 
-class Policy(ReviewConfig):
-    pass
-
-
-class PublicationConfig(TypedDict):
-    checks: bool
-    labels: Literal["auto", "manual", "off"]
-
-
 class Config(TypedDict):
-    version: Literal[2]
-    review: ReviewConfig
-    publication: PublicationConfig
-
-
-class Source(TypedDict):
-    repository: str
-    sha: str
-    path: str
-
-
-class Provenance(TypedDict):
-    evaluator: Source
-    config: Source
-    workflow: Source | None
+    version: Literal[3]
+    review: Policy
 
 
 class PullRequest(TypedDict):
@@ -141,29 +119,9 @@ class ConditionAssessment(TypedDict):
 
 
 class Assessment(ConditionAssessment):
-    format: Literal["pr-merge-readiness/report"]
-    # 純粋な評価の後、保存前に信頼済みソース情報を付与する。
-    provenance: NotRequired[Provenance]
-    schema_version: Literal[2]
-    mode: Literal["shadow"]
     label_assessment: ConditionAssessment
     observations: Observations
     policy: Policy
-    policy_sha256: str
-
-
-class Manifest(TypedDict):
-    format: Literal["pr-merge-readiness/manifest"]
-    schema_version: Literal[1]
-    provenance: Provenance
-    artifact_name: str
-    repository: str
-    run_id: str
-    run_attempt: str
-    started_at: str
-    reports: list[str]
-    collection_failed: bool
-    selection: Literal["single_pr", "all_open"]
 
 
 class EvaluationError(ValueError):

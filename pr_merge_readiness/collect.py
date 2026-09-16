@@ -391,7 +391,9 @@ def collect(
                 "PR head changed after proposal validation during observation"
             )
         facts["rechecked"] = {
-            "pr": before == after,
+            # 更新時刻だけでは判定に使う内容の変化を示さない。差分には残す。
+            "pr": {key: value for key, value in before.items() if key != "updated_at"}
+            == {key: value for key, value in after.items() if key != "updated_at"},
             "reviews": initial_metadata["reviews"] == confirmed_metadata["reviews"],
             "unresolved_threads": initial_metadata["unresolved_threads"]
             == confirmed_metadata["unresolved_threads"],
