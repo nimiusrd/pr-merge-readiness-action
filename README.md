@@ -2,16 +2,16 @@
 
 PR のレビュー・変更履歴を確認し、対応が必要かをラベルと Actions の実行サマリーに表示する GitHub Action です。
 
-> このソースは設定 version 3 を使う簡素化版です。公開済み v0.5.1 には含まれません。以下の `<RELEASE_COMMIT_SHA>` は、[リリース手順](docs/releases.md)で公開した対応版の40桁 SHA に置き換えてください。
+設定 version 3 に対応する [v0.6.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.6.0) を公開しています。旧版からの更新は[移行手順](docs/workflow.md#version-2-からの移行)を参照してください。
 
 ## 導入
 
 1. [最小設定](examples/minimal.toml)を `.github/pr-merge-readiness.toml` にコピーします。
-2. 次の workflow を `.github/workflows/pr-merge-readiness.yml` に保存し、Action の参照を対応リリースの SHA に置き換えます。
+2. 次の workflow を `.github/workflows/pr-merge-readiness.yml` に保存します。
 3. default branch に反映します。以降は PR の更新時に実行され、Actions の **Run workflow** からも更新できます。
 
 ```yaml
-# <RELEASE_COMMIT_SHA> を設定version 3対応リリースの40桁 SHA に置き換えてください。
+# uses をリリースタグが指す40桁 SHA に固定します。
 name: PR Merge Readiness
 
 on:
@@ -41,7 +41,7 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@<RELEASE_COMMIT_SHA>
+      - uses: nimiusrd/pr-merge-readiness-action@568c7441e16afa46db11bc84f1e4708e6525a404 # v0.6.0
 ```
 
 PR 番号を指定した手動実行は、その PR のラベルを更新します。空欄なら全 open PR を判定し、終了済み PR の管理ラベルも除去します。対象がない場合は成功します。利用側の checkout、Python・uv のセットアップは不要です。
@@ -95,7 +95,7 @@ PR ごとの情報不足はサマリーと `shadow/再観測が必要` で示し
 | `config-path` | `.github/pr-merge-readiness.toml` |
 | `token` | `github.token` |
 
-Action の版は `uses: nimiusrd/pr-merge-readiness-action@<RELEASE_COMMIT_SHA>` だけで指定します。実際の参照を GitHub のコンテキストから取得し、40桁 SHA と提供元を確認します。local Action（`uses: ./path`）は非対応です。
+Action の版は `uses:` の40桁 SHA だけで指定します。実際の参照を GitHub のコンテキストから取得し、40桁 SHA と提供元を確認します。local Action（`uses: ./path`）は非対応です。
 
 出力は `operation`（`observe` / `validate-config` / `skip`）と `config-sha`（読み取った設定コミット）です。`operation` を入力で指定する機能はありません。
 

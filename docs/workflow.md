@@ -30,24 +30,24 @@ PR のソースコードは checkout・実行しません。PR イベントの h
 
 ## version 2 からの移行
 
-この変更は互換性のない簡素化です。公開済み v0.5.1 は version 3 を扱えません。[対応バイナリのリリース](releases.md)を先に完了させてください。
+v0.6.0 は互換性のない簡素化を含みます。v0.5.1 は version 3 を扱えないため、設定と Action の参照先を同時に更新します。
 
 1. TOML の `version` を `3` にし、`[publication]` 全体と `action_ref` を削除します。`[review]` の3項目はそのまま使えます。
-2. workflow を[新しい例](../examples/pr-merge-readiness.yml)に合わせます。`uses:` の `<RELEASE_COMMIT_SHA>` を対応リリースの40桁 SHA に置き換えます。
+2. workflow を[新しい例](../examples/pr-merge-readiness.yml)に合わせます。v0.6.0 の配布用 SHA は `568c7441e16afa46db11bc84f1e4708e6525a404` です。
 3. `checks: write` 権限と手動入力 `update-labels` を削除します。実行した対象のラベルは常に更新されます。旧版の `labels = "manual"`・`"off"` に相当する観測専用モードはありません。
 4. 個別 operation や artifact 受け渡しの job を使っていた場合は、1 job・1 step の呼び出しに置き換えます。
 5. 設定と workflow を同じコミットで default branch に反映し、Run workflow で PR 番号を空欄にしてラベルを同期します。
 
-移行コミットの PR 検証では旧版の設定検証が version 3 を拒否するため、移行完了前に新旧両方を同じ設定で成功させることはできません。これが必須チェックに組み込まれている利用先では、管理者の通常の変更手順で移行を調整してください。default branch に反映した後、新しい workflow を手動実行して確認します。
+移行 PR では、旧版の Action は提案された version 3 を拒否し、新版の Action は default branch に残る version 2 を拒否します。移行完了前に新旧両方を同じ設定で成功させることはできません。これが必須チェックに組み込まれている利用先では、管理者の通常の変更手順で移行を調整してください。default branch に反映した後、新しい workflow を手動実行して確認します。
 
 削除したもの：
 
 - Action 入力の `operation`、`action-ref`、`repository`、`config-sha`、`pr-number`、`event-path`、`report-dir`、`artifact-name`
-- local Action（`uses: ./path`）の呼び出し。提供元の remote Action を `uses: nimiusrd/pr-merge-readiness-action@<RELEASE_COMMIT_SHA>` で指定します。
+- local Action（`uses: ./path`）の呼び出し。提供元の remote Action を、上記の配布用 SHA に固定して指定します。
 - 出力の `checks`、`labels`、`pr-number`、`report-dir`、`manifest`、`artifact-name`
 - 参考 Check の公開、JSON artifact と manifest、CLI の `replay`
 - 公開モードの設定と `update-labels` 入力
 
 手動実行の `pr-number` は workflow の入力として残ります。Action の入力とは異なります。過去の Check は履歴として残り、新版は更新しません。過去 artifact の再評価が必要な場合は、記録と一致する信頼済みの旧版を使用してください。
 
-このリポジトリ自身の `.github/` は対応版の公開まで v0.5.1 と version 2 を維持します。新しい例・設定へ切り替えるのは公開後です。
+このリポジトリ自身の `.github/` も v0.6.0 と version 3 を使用します。

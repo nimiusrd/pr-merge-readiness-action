@@ -35,7 +35,7 @@ def check_action_flow(action: dict[str, Any]) -> None:
     }
 
 
-def check_runtime(workflow: dict[str, Any], *, legacy: bool = False) -> None:
+def check_runtime(workflow: dict[str, Any]) -> None:
     assert workflow["permissions"] == {}
     assert "concurrency" not in workflow
     assert set(workflow["jobs"]) == {"readiness"}
@@ -49,17 +49,13 @@ def check_runtime(workflow: dict[str, Any], *, legacy: bool = False) -> None:
         "queue": "max",
     }
     expected = {"contents": "read", "pull-requests": "write", "issues": "write"}
-    if legacy:
-        expected["checks"] = "write"
     assert job["permissions"] == expected
     manual_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-    assert set(manual_inputs) == ({"pr-number", "update-labels"} if legacy else {"pr-number"})
+    assert set(manual_inputs) == {"pr-number"}
     assert len(job["steps"]) == 1
     assert set(job["steps"][0]) == {"uses"}
     reference = job["steps"][0]["uses"]
-    assert re.fullmatch(re.escape(ACTION_REPOSITORY) + r"@[0-9a-f]{40}", reference) or (
-        not legacy and reference == ACTION_REPOSITORY + "@<RELEASE_COMMIT_SHA>"
-    )
+    assert re.fullmatch(re.escape(ACTION_REPOSITORY) + r"@[0-9a-f]{40}", reference)
 
 
 def main() -> None:
@@ -102,30 +98,17 @@ def main() -> None:
         workflow = load(path)
         workflows.append(workflow)
         if path.name == "pr-merge-readiness.yml":
-            # 対応バイナリ公開までは、稼働中のv0.5.1とversion 2を一緒に維持する。
             settings = tomllib.loads((ROOT / ".github/pr-merge-readiness.toml").read_text())
-            legacy = settings["version"] == 2
-            if legacy:
-                assert workflow["jobs"]["readiness"]["steps"][0]["uses"] == (
-                    ACTION_REPOSITORY + "@38abf77191ca0801d10dd6bd8c9d387bdad4b911"
-                )
-            else:
-                validate_config(settings)
-            check_runtime(workflow, legacy=legacy)
-    templates = {id(example), id(quickstart)}
+            validate_config(settings)
+            check_runtime(workflow)
+            assert workflow == example
     steps = list(action["runs"]["steps"])
     for workflow in workflows:
         assert "on" in workflow and "jobs" in workflow
         assert not {"schedule", "workflow_call"} & workflow["on"].keys()
         for job in workflow["jobs"].values():
             assert "uses" not in job  # 全て通常の job から step として呼ぶ。
-            for step in job["steps"]:
-                if (
-                    id(workflow) in templates
-                    and step.get("uses") == ACTION_REPOSITORY + "@<RELEASE_COMMIT_SHA>"
-                ):
-                    continue  # 未公開版の例だけに許す明示的なプレースホルダー。
-                steps.append(step)
+            steps.extend(job["steps"])
     uv_setups = 0
     for step in steps:
         uses = step.get("uses", "")
