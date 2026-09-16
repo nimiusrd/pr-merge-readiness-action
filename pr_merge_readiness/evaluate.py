@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any
 
 from .contracts import (
@@ -209,7 +207,7 @@ def review_assessment(facts: Observations, policy: Policy) -> ConditionAssessmen
 
 
 def pr_conditions(facts: Observations) -> list[Condition]:
-    """参考Check・レポート用のPR状態。ラベル判定からは独立させる。"""
+    """サマリー用のPR状態。ラベル判定からは独立させる。"""
     conditions: list[Condition] = []
 
     def condition(name: str, status: ConditionStatus, detail: Any) -> None:
@@ -250,13 +248,9 @@ def assess(facts: Observations, policy: Policy) -> Assessment:
     labels = review_assessment(facts, policy)
     conditions = pr_conditions(facts) + labels["conditions"]
     return {
-        "format": "pr-merge-readiness/report",
-        "schema_version": 2,
-        "mode": "shadow",
         "decision": conditions_decision(conditions),
         "conditions": conditions,
         "label_assessment": labels,
         "observations": facts,
         "policy": policy,
-        "policy_sha256": hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest(),
     }

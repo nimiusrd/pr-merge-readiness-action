@@ -50,7 +50,7 @@ LABEL_DESCRIPTIONS = {
 
 
 class PublishError(ValueError):
-    """ラベル書き込みや対象PRの再取得失敗。観測JSONは変更しない。"""
+    """ラベル書き込みや対象PRの再取得失敗。"""
 
 
 class GitHub:

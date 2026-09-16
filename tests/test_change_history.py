@@ -145,7 +145,6 @@ def test_threshold_is_policy_controlled_and_mandatory():
     assert assess(data, config())["decision"] == "SHADOW_CONDITIONS_MET"
     strict = assess(data, {**config(), "stale_change_review_days": 14})
     assert strict["decision"] == "HUMAN_REVIEW_REQUIRED"
-    assert strict["policy_sha256"] != assess(data, config())["policy_sha256"]
     for invalid in [0, -1, True, None, "30", 1.5]:
         with pytest.raises(EvaluationError):
             assess(data, {**config(), "stale_change_review_days": invalid})

@@ -1,6 +1,6 @@
 # バイナリのビルドとリリース
 
-Python 3.14 と uv 0.12.13 で開発し、`uv.lock` の PyInstaller 6.22.3 で Python 同梱の単一実行ファイルを生成します。実行時に uv・Python の導入、依存解決、ビルドは行いません。Composite Action は OS・CPU に応じた同梱バイナリを呼び、観測 artifact の保存は引き続き upload-artifact で行います。
+Python 3.14 と uv 0.12.13 で開発し、`uv.lock` の PyInstaller 6.22.3 で Python 同梱の単一実行ファイルを生成します。実行時に uv・Python の導入、依存解決、ビルドは行いません。Composite Action は OS・CPU に応じた同梱バイナリを1回呼び、ラベルと実行サマリーを更新します。
 
 ## 配布物と対応環境
 
@@ -11,7 +11,7 @@ Python 3.14 と uv 0.12.13 で開発し、`uv.lock` の PyInstaller 6.22.3 で P
 
 Ubuntu 22.04 以降の Linux x64 / arm64 を対象にします。Windows・macOS は対象外です。PyInstaller は OS・CPU ごとにビルドが必要で、Linux ではビルド環境の glibc より古い環境での動作を保証しません。[PyInstaller のプラットフォーム制約](https://pyinstaller.org/en/stable/usage.html#supporting-multiple-platforms)に従い、各 CPU の Ubuntu 22.04 runner でビルド・検証します。
 
-各バイナリに `SHA256SUMS` を付け、Release assets には `pr-merge-readiness-linux-x64.tar.gz` と `pr-merge-readiness-linux-arm64.tar.gz` を公開します。Action は assets を実行時にダウンロードせず、`uses:` で指定したコミット内の実行ファイルを使います。Git はローカル Action の参照確認と `replay` に必要です。
+各バイナリに `SHA256SUMS` を付け、Release assets には `pr-merge-readiness-linux-x64.tar.gz` と `pr-merge-readiness-linux-arm64.tar.gz` を公開します。Action は assets を実行時にダウンロードせず、`uses:` で指定したコミット内の実行ファイルを使います。Action の実行に Git は不要です。
 
 ## 開発時の検証
 
@@ -25,7 +25,7 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 
 ビルド用の依存は `build` group、作業用ファイルは Git 管理外の `build/`、バイナリの出力先は `dist/` です。Release workflow が配布用のバイナリと checksum を main で追跡します。`.gitignore` の `dist/` は、それ以外の未追跡の出力を除外するために残します。通常の `uv sync --locked` は開発・テスト用です。ビルド時は `--group build` を付けます。ローカル Dev Container のビルドはその Linux 環境向けの検証であり、配布物は Release workflow の Ubuntu 22.04 環境で作ります。ローカルで再ビルドすると追跡済みファイルにも差分が出るため、その差分を実装 PR に含めないでください。
 
-バイナリテストは PATH から Python・uv を外し、利用側の Python 設定・モジュールを置いたディレクトリで実行します。TOML 検証、HTTP による設定取得、対象外 PR の省略、引数の受け渡し、信頼済み Git commit の評価器によるオフライン `replay` を確認します。CI は x64・arm64 の両方でこの検証を行います。
+バイナリテストは PATH から Python・uv を外し、利用側の Python 設定・モジュールを置いたディレクトリで実行します。TOML 検証、HTTP による設定取得、対象外 PR の省略、引数の受け渡しを確認します。CI は x64・arm64 の両方でこの検証を行います。
 
 ## 公開手順
 
@@ -33,7 +33,7 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 2. Actions の **Release → Run workflow** で main を選び、未使用の `vMAJOR.MINOR.PATCH` を入力します。タグ名は Action の配布版を識別します。Python パッケージを PyPI に公開する処理はありません。
 3. `build` job が source のテスト・静的検査、バイナリのビルド・テストを両 CPU で実行します。成功したバイナリと checksum を同じ run の artifact として保存します。
 4. `publish` job が main の先端とビルド対象のソース SHA の一致を確認し、同じ run の artifact だけを一時ディレクトリに取得します。checksum を検証し、`dist/` の2つのバイナリと checksum を置き換えます。変更があればソースコミットを親とする**配布用コミット**を作り、main の更新とそのコミットを指すタグの作成を atomic push で同時に公開してから、GitHub Release を作成します。バイナリと checksum が既存の内容と同じ場合は、現在の main コミットにタグを付けます。
-5. リリースノートの配布用コミット SHA を確認し、利用側の `uses:` をその40桁 SHA に変更します。v0.5.1 から TOML の `action_ref` は不要です。このリポジトリ自身の `.github/`・利用例・README と、利用側リポジトリの固定 SHA も更新し、旧バイナリ向けに残していた `action_ref` を削除します。[設定と Action の SHA の分離](workflow.md#設定と-action-の-sha-の分離)に従って更新 PR とマージ後の手動観測を確認します。
+5. リリースノートの配布用コミット SHA を確認し、README・利用例の `<RELEASE_COMMIT_SHA>` をその SHA に置き換えます。このリポジトリ自身と利用側の `.github/` は、[version 2 からの移行](workflow.md#version-2-からの移行)に従って設定と workflow を同時に更新します。新しい設定だけを旧バイナリへ先行導入しないでください。
 
 ソースコミットと配布用コミットはどちらも main の履歴に残ります。リリースノートにはビルド対象のソース SHA と公開した配布用 SHA を記載します。**Action にはリリースタグが指す40桁 SHA を指定してください。** リリース後の main にはソースだけを変更するコミットも入るため、任意の main の SHA では同梱バイナリとソースの対応を保証できません。`run.sh` はソースから動かす開発用 CLI として残します。
 
@@ -49,8 +49,6 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 
 main・タグの公開後に GitHub Release の作成だけが失敗した場合、同じバージョンでの再実行は既存タグとして停止します。公開済み main を巻き戻さず、タグが指す配布用コミットと元の run の検証済み artifact を確認し、同じ配布物で Release 作成を完了してください。タグの移動や、別のソース・再ビルドしたバイナリによる同一バージョンの上書きは行いません。
 
-## CLI と replay
+## CLI
 
-配布用コミットを checkout すれば `bash run-binary.sh validate-config --config <path>` や `bash run-binary.sh replay ...` を実行できます。Release asset を展開し、実行ファイルを直接呼び出すこともできます。ローカル Composite Action として使う場合は、配布用コミットの checkout と `dist/<platform>/` の配置を維持してください。
-
-`replay` は自身の実行ファイルを子プロセスとして起動し、明示した信頼済み SHA の評価器を `git archive` で取り出して実行します。Python を外部から起動せず、現在の checkout やバイナリ内の評価器に置き換えません。ネットワーク呼び出しは禁止します。外部 Git の起動時は、PyInstaller が変更した `LD_LIBRARY_PATH` を元に戻します。[PyInstaller の実行時の仕様](https://pyinstaller.org/en/stable/runtime-information.html)を参照してください。
+配布用コミットを checkout すれば `bash run-binary.sh validate-config --config <path>` を実行できます。Release asset を展開し、実行ファイルを直接呼び出して設定を検証することもできます。PR の判定・ラベル更新は、GitHub workflow から40桁 SHA で固定した remote Action を呼び出してください。local Action（`uses: ./path`）は非対応です。

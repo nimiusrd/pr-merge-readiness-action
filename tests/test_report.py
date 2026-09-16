@@ -7,14 +7,11 @@ from tests.test_support import HEAD, facts, policy
 
 def result(data):
     return {
-        "schema_version": 2,
-        "mode": "shadow",
         "decision": "WAITING",
         "label_assessment": {"decision": "SHADOW_CONDITIONS_MET", "conditions": []},
         "conditions": [{"name": "example", "status": "waiting", "detail": "reason"}],
         "observations": data,
         "policy": policy(),
-        "policy_sha256": "fingerprint",
     }
 
 

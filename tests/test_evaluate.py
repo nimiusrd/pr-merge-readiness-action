@@ -13,7 +13,6 @@ def decision(data, config=None):
 def test_conditions_met_is_explicitly_shadow_only():
     result = assess(facts(), policy())
     assert result["decision"] == "SHADOW_CONDITIONS_MET"
-    assert result["mode"] == "shadow"
     assert "risk" not in result
     assert all((c["status"] == "pass" for c in result["conditions"]))
 
@@ -219,13 +218,6 @@ def test_unresolved_threads_are_an_explicit_policy():
 def test_policy_rejects_ci_configuration_and_invalid_review_settings(change):
     with pytest.raises(EvaluationError):
         assess(facts(), {**policy(), **change})
-
-
-def test_policy_fingerprint_is_stable_and_sensitive_to_configuration():
-    config = policy()
-    first = assess(facts(), config)["policy_sha256"]
-    assert first == assess(facts(), dict(reversed(list(config.items()))))["policy_sha256"]
-    assert first != assess(facts(), {**config, "minimum_approvals": 1})["policy_sha256"]
 
 
 @pytest.mark.parametrize(

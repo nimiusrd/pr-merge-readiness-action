@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
-from .contracts import Config, EvaluationError, Policy, boolean, integer, string
+from .contracts import Config, EvaluationError, Policy, integer, string
 from .evaluate import validate_policy
 
 ACTION_REPOSITORY = "nimiusrd/pr-merge-readiness-action"
@@ -37,22 +37,15 @@ def relative_path(value: str) -> str:
 
 
 def validate_config(value: dict[str, Any]) -> Config:
-    keys(value, {"version", "review"}, {"publication", "action_ref"})
-    if type(value["version"]) is not int or value["version"] != 2:
-        raise EvaluationError("unsupported config version")
+    keys(value, {"version", "review"})
+    if type(value["version"]) is not int or value["version"] != 3:
+        raise EvaluationError("config version 3 required; see docs/workflow.md for migration")
     keys(
         value["review"],
         {"minimum_approvals", "require_resolved_threads", "stale_change_review_days"},
     )
     validate_policy(cast(Policy, value["review"]))
-    publication = value.get("publication", {})
-    keys(publication, set(), {"checks", "labels"})
-    publication = {"checks": True, "labels": "manual", **publication}
-    boolean(publication["checks"], "publication.checks")
-    if publication["labels"] not in ("auto", "manual", "off"):
-        raise EvaluationError("publication.labels must be auto, manual or off")
-    # 既存の version 2 設定に残る action_ref は読み捨てる。実行元は workflow で固定する。
-    return cast(Config, {"version": 2, "review": value["review"], "publication": publication})
+    return cast(Config, {"version": 3, "review": value["review"]})
 
 
 def load_config(path: Path) -> Config:

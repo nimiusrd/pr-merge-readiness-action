@@ -1,36 +1,28 @@
-"""Composite Action の入力・信頼境界。"""
+"""設定の検証・観測・ラベル更新を同じ実行内で完結させる。"""
 
 import base64
 import html
 import json
 import os
-import subprocess
-import sys
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from . import publish, publish_checks
-from .artifacts import MANIFEST_FORMAT, artifact_name, load_reports, provenance, write_json
+from . import publish
 from .collect import GitHub
 from .config import (
     ACTION_REPOSITORY,
+    CONFIG_PATH,
     policy_from,
     positive,
     relative_path,
     validate_config,
 )
-from .contracts import Assessment, Config, EvaluationError, sha
+from .contracts import Config, EvaluationError, sha
 from .observe import observe
-from .process import system_environment
-
-ROOT = (
-    Path(sys.executable).resolve().parent.parent.parent
-    if getattr(sys, "frozen", False)
-    else Path(__file__).resolve().parent.parent
-)
+from .report import markdown
 
 
 def output(values: Mapping[str, object]) -> None:
@@ -44,39 +36,33 @@ def output(values: Mapping[str, object]) -> None:
                 stream.write(f"{key}={value}\n")
 
 
-def summary(path: Path) -> None:
+def summary(text: str) -> None:
     destination = os.environ.get("GITHUB_STEP_SUMMARY")
-    if destination and path.is_file():
+    if destination:
         with Path(destination).open("a") as stream:
-            stream.write(path.read_text())
+            stream.write(text + "\n")
 
 
-def verify_source(expected: str) -> None:
-    sha(expected)
+def report_error(error: Exception) -> None:
+    print(json.dumps({"error": str(error)}))
+    try:
+        summary("処理失敗: <code>" + html.escape(str(error)) + "</code>")
+    except OSError as summary_error:
+        print(json.dumps({"summary_error": str(summary_error)}))
+
+
+def verify_source() -> None:
     context_ref = os.environ.get("PMR_SOURCE_REF", "")
-    context_repository = os.environ.get("PMR_SOURCE_REPOSITORY", "")
-    if context_ref:
-        if context_ref != expected or context_repository != ACTION_REPOSITORY:
-            raise EvaluationError("Action source reference mismatch; pin a full SHA")
-    else:
-        # ローカル Action の場合も、親にある利用側 checkout の SHA で代用しない。
-        def git(*args: str) -> str:
-            return subprocess.run(
-                ["git", "-C", str(ROOT), *args],
-                check=True,
-                capture_output=True,
-                text=True,
-                env=system_environment(),
-            ).stdout.strip()
-
-        if (
-            Path(git("rev-parse", "--show-toplevel")).resolve() != ROOT
-            or git("rev-parse", "HEAD") != expected
-        ):
-            raise EvaluationError("local Action checkout SHA mismatch")
+    if not context_ref:
+        raise EvaluationError(
+            "local Actions are unsupported; use the remote Action pinned to a full SHA"
+        )
+    sha(context_ref)
+    if os.environ.get("PMR_SOURCE_REPOSITORY") != ACTION_REPOSITORY:
+        raise EvaluationError("Action source repository mismatch")
 
 
-def trusted_config(api: GitHub, path: str, config_sha: str) -> tuple[Config, str]:
+def trusted_config(api: GitHub, path: str, config_sha: str = "") -> tuple[Config, str]:
     relative_path(path)
     if not config_sha:
         branch = api.request(api.prefix)["default_branch"]
@@ -110,271 +96,65 @@ def pr_event_operation(event: dict[str, Any]) -> str:
     return "skip"
 
 
-def route(
-    event_name: str, event: dict[str, Any], config: Config, pr_number: str, update_labels: bool
-) -> str:
-    if pr_number:
-        positive(pr_number)
-    if event_name != "workflow_dispatch" and (pr_number or update_labels):
-        raise EvaluationError("manual inputs require workflow_dispatch")
-    if update_labels and (pr_number or config["publication"]["labels"] == "off"):
-        raise EvaluationError("labels require all open PRs and publication.labels=auto or manual")
-    if event_name == "workflow_dispatch":
-        return "observe"
-    if event_name == "pull_request":
-        return pr_event_operation(event)
-    return "skip"
-
-
-def prepare(config: Config, config_sha: str, *, automatic: bool = False) -> int:
-    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-    inputs = event.get("inputs", {})
+def manual_pr_number(event: dict[str, Any]) -> int | None:
+    inputs = event.get("inputs")
     if inputs is None:
-        inputs = {}
-    if not isinstance(inputs, dict):
-        raise EvaluationError("manual inputs must be an object")
-    pr_number = inputs.get("pr-number", "")
-    labels = inputs.get("update-labels", False)
-    if not isinstance(pr_number, str) or not (
-        type(labels) is bool or isinstance(labels, str) and labels in ("true", "false")
-    ):
-        raise EvaluationError("invalid manual inputs")
-    update_labels = labels in ("true", True)
-    event_name = os.environ["GITHUB_EVENT_NAME"]
-    operation = route(event_name, event, config, pr_number, update_labels)
-    if event_name == "pull_request" and operation == "observe":
-        update_labels = config["publication"]["labels"] == "auto"
-    values = {
-        "config-sha": config_sha,
-        "operation": operation,
-        "checks": str(config["publication"]["checks"]).lower(),
-        "labels": str(update_labels).lower(),
-        "pr-number": pr_number,
-    }
-    if automatic and operation == "observe":
-        name = artifact_name(os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"])
-        directory = (Path(os.environ.get("RUNNER_TEMP", ".")) / name).resolve()
-        values.update(
-            {
-                "report-dir": str(directory),
-                "manifest": str(directory / "manifest.json"),
-                "artifact-name": name,
-            }
-        )
-    output(values)
-    return 0
-
-
-def label_publication_head(
-    config: Config,
-    event_name: str,
-    event: dict[str, Any],
-    manifest: dict[str, Any],
-    reports: list[tuple[int, Assessment]],
-) -> str | None:
-    """手動は全open PR、自動はイベント元PRに限定し、書込み前に検証する。"""
-    if event_name == "workflow_dispatch" and config["publication"]["labels"] != "off":
-        inputs = event.get("inputs", {})
-        if (
-            not isinstance(inputs, dict)
-            or inputs.get("pr-number")
-            or not (inputs.get("update-labels") is True or inputs.get("update-labels") == "true")
-            or manifest["selection"] != "all_open"
-        ):
-            raise EvaluationError(
-                "labels require explicit update-labels and an all-open observation"
-            )
         return None
-    if (
-        event_name == "pull_request"
-        and config["publication"]["labels"] == "auto"
-        and pr_event_operation(event) == "observe"
-    ):
-        number = positive(str(event["pull_request"]["number"]))
-        head = sha(event["pull_request"]["head"]["sha"])
-        if manifest["selection"] != "single_pr" or [n for n, _ in reports] != [number]:
-            raise EvaluationError("automatic labels require only the event PR observation")
-        observed = reports[0][1]["observations"].get("pr")
-        if observed is not None and observed["head_sha"] != head:
-            raise EvaluationError("label observation head differs from event PR head")
-        return head
-    raise EvaluationError("labels require an auto PR event or an explicit manual invocation")
+    if not isinstance(inputs, dict) or inputs.keys() - {"pr-number"}:
+        raise EvaluationError("manual inputs only support pr-number; labels are always updated")
+    number = inputs.get("pr-number", "")
+    return None if number == "" else positive(number)
 
 
 def run_action() -> int:
-    values = {
-        name: os.environ.get("PMR_" + name.upper().replace("-", "_"), "")
-        for name in (
-            "operation",
-            "action-ref",
-            "config-path",
-            "config-sha",
-            "repository",
-            "pr-number",
-            "event-path",
-            "report-dir",
-            "artifact-name",
-        )
-    }
-    operation = values["operation"] or "run"
-    automatic = operation == "run"
-    proposal_sha = ""
-    if automatic:
-        if any(
-            values[key]
-            for key in ("config-sha", "pr-number", "event-path", "report-dir", "artifact-name")
-        ):
-            raise EvaluationError("run derives configuration, PR, event and report inputs")
-        event_name = os.environ["GITHUB_EVENT_NAME"]
-        if event_name == "pull_request":
-            event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-            operation = "prepare" if pr_event_operation(event) == "observe" else "skip"
-            if operation == "prepare":
-                proposal_sha = sha(event["pull_request"]["head"]["sha"])
-        elif event_name == "push":
-            values["config-sha"] = os.environ["GITHUB_SHA"]
-            operation = "validate-config"
-        elif event_name == "workflow_dispatch":
-            operation = "prepare"
-        else:
-            operation = "skip"
-    values["action-ref"] = values["action-ref"] or os.environ.get("PMR_SOURCE_REF", "")
-    values["config-path"] = values["config-path"] or ".github/pr-merge-readiness.toml"
-    if not (automatic and operation == "skip") and operation not in {
-        "prepare",
-        "validate-config",
-        "observe",
-        "publish-checks",
-        "publish-labels",
-    }:
-        raise EvaluationError("unknown operation")
-    publishing = operation.startswith("publish-")
-    if operation in {"prepare", "validate-config"}:
-        if any(values[key] for key in ("pr-number", "event-path", "report-dir", "artifact-name")):
-            raise EvaluationError("configuration operations do not take PR/event/report inputs")
-        if operation == "prepare" and values["config-sha"]:
-            raise EvaluationError("prepare resolves the default branch once")
-        if operation == "validate-config" and not values["config-sha"]:
-            raise EvaluationError("validate-config requires an explicit proposal config-sha")
-    if publishing and (values["pr-number"] or values["event-path"]):
-        raise EvaluationError("irrelevant PR/event input")
-    if publishing and not values["config-sha"]:
-        raise EvaluationError("publication requires the observation config-sha")
-    verify_source(values["action-ref"])
-    if automatic and operation == "skip":
+    verify_source()
+    event_name = os.environ["GITHUB_EVENT_NAME"]
+    if event_name not in {"pull_request", "workflow_dispatch", "push"}:
         output({"operation": "skip"})
         return 0
-    api = GitHub(values["repository"] or os.environ["GITHUB_REPOSITORY"])
-    if api.repository != os.environ["GITHUB_REPOSITORY"]:
-        raise EvaluationError("repository must match the workflow context")
-    if not (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")):
-        raise EvaluationError("token required")
-    if proposal_sha:
-        # 提案は検証だけに使い、観測・公開のpolicyはdefault branchから別に確定する。
-        trusted_config(api, values["config-path"], proposal_sha)
-    config, config_sha = trusted_config(api, values["config-path"], values["config-sha"])
-    if operation == "prepare":
-        if automatic:
-            output({"validated-head": proposal_sha})
-        return prepare(config, config_sha, automatic=automatic)
-    if operation == "validate-config":
-        if automatic:
-            output({"operation": "validate-config"})
-        output({"config-sha": config_sha})
-        print(json.dumps({"valid": True, "config_sha": config_sha}))
-        return 0
-    source = provenance(api.repository, values["action-ref"], config_sha, values["config-path"])
-    policy = policy_from(config)
     event = (
         {}
-        if publishing
-        else json.loads(Path(values["event-path"] or os.environ["GITHUB_EVENT_PATH"]).read_text())
+        if event_name == "push"
+        else json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     )
-    # 自動runが実際に検証したSHAだけを内部step間で引き継ぐ。
-    # 個別operationでは、起動イベントのPRを全レポートへ一律に適用しない。
-    validated_head = os.environ.get("PMR_VALIDATED_HEAD", "")
-    expected_head = sha(validated_head) if validated_head else None
-    run_id, attempt = os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"]
-    run_url = f"https://github.com/{api.repository}/actions/runs/{positive(run_id)}/attempts/{positive(attempt)}"
-    name = artifact_name(run_id, attempt)
-    if values["artifact-name"] != name or not values["report-dir"]:
-        raise EvaluationError("this run/attempt artifact-name and report-dir are required")
-    directory = Path(values["report-dir"]).resolve()
-    output(
-        {
-            "config-sha": config_sha,
-            "report-dir": directory,
-            "manifest": directory / "manifest.json",
-            "artifact-name": name,
-        }
+    if event_name == "pull_request" and pr_event_operation(event) == "skip":
+        output({"operation": "skip"})
+        return 0
+    number = manual_pr_number(event) if event_name == "workflow_dispatch" else None
+    expected_head = (
+        sha(event["pull_request"]["head"]["sha"]) if event_name == "pull_request" else None
     )
-    if operation == "observe":
-        if (
-            route(os.environ["GITHUB_EVENT_NAME"], event, config, values["pr-number"], False)
-            != "observe"
-        ):
-            raise EvaluationError("event does not request observation")
-        code = observe(
-            api,
-            policy,
-            event,
-            positive(values["pr-number"]) if values["pr-number"] else None,
-            directory,
-            source,
-            run_id,
-            attempt,
-            name,
-            expected_head=expected_head,
-        )
-        summary(directory / "summary.md")
-        return code
-    if operation == "publish-checks" and not config["publication"]["checks"]:
-        raise EvaluationError("Check publication is disabled")
-    reports = load_reports(directory, api.repository, run_id, attempt, name, source, policy)
-    if operation == "publish-labels":
-        event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-        manifest = json.loads((directory / "manifest.json").read_text())
-        expected_head = label_publication_head(
-            config, os.environ["GITHUB_EVENT_NAME"], event, manifest, reports
-        )
+    api = GitHub(os.environ["GITHUB_REPOSITORY"])
+    if not (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")):
+        raise EvaluationError("token required")
+    path = os.environ.get("PMR_CONFIG_PATH") or CONFIG_PATH
+    if event_name == "push":
+        _, config_sha = trusted_config(api, path, sha(os.environ["GITHUB_SHA"]))
+        output({"operation": "validate-config", "config-sha": config_sha})
+        print(json.dumps({"valid": True, "config_sha": config_sha}))
+        return 0
+    if expected_head is not None:
+        # 提案は検証だけに使う。判定にはdefault branchで一度確定した設定を使う。
+        trusted_config(api, path, expected_head)
+    config, config_sha = trusted_config(api, path)
+    output({"operation": "observe", "config-sha": config_sha})
+    summary("設定コミット: <code>" + config_sha + "</code>")
+    reports = observe(api, policy_from(config), event, number, expected_head=expected_head)
+    # 全対象の観測が終わってから公開する。別step・保存済みJSONからの再読込は不要。
+    summary(
+        "\n".join(markdown(report) for _, report in reports) or "評価対象の open PR はありません。"
+    )
     writer = publish.GitHub(api.repository)
-    failed = False
-    if operation == "publish-labels":
+    failed = any(report["decision"] == "INSUFFICIENT_DATA" for _, report in reports)
+    if reports:
         publish.ensure_labels(writer)
-    for number, report in reports:
+    for target, report in reports:
         try:
-            result = (
-                publish_checks.publish_report(
-                    writer, number, report, run_url, name, expected_head=expected_head
-                )
-                if operation == "publish-checks"
-                else publish.publish_pr(writer, number, report, expected_head=expected_head)
-            )
-            print(json.dumps({"pr": number, "publication": result}, ensure_ascii=False))
+            result = publish.publish_pr(writer, target, report, expected_head=expected_head)
+            print(json.dumps({"pr": target, "publication": result}, ensure_ascii=False))
         except (publish.PublishError, KeyError, TypeError, ValueError) as error:
             failed = True
-            print(json.dumps({"pr": number, "error": str(error)}))
-    if operation == "publish-labels" and os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
+            report_error(EvaluationError(f"PR #{target}: {error}"))
+    if event_name == "workflow_dispatch" and number is None:
         publish.cleanup_closed(writer)
     return int(failed)
-
-
-def save_failure(directory: Path, error: Exception) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    write_json(
-        directory / "collection-error.json", {"decision": "INSUFFICIENT_DATA", "error": str(error)}
-    )
-    # 準備失敗時は信頼済み provenance を捏造しない。publisher は必ず拒否する。
-    write_json(
-        directory / "manifest.json",
-        {
-            "format": MANIFEST_FORMAT,
-            "schema_version": 1,
-            "collection_failed": True,
-            "reports": [],
-            "provenance": None,
-        },
-    )
-    path = directory / "summary.md"
-    path.write_text("INSUFFICIENT_DATA: <code>" + html.escape(str(error)) + "</code>\n")
-    summary(path)

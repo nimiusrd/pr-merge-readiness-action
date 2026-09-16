@@ -3,19 +3,20 @@
 import base64
 import json
 import os
-import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
+from urllib.parse import urlsplit
 
 import pytest
 
-from pr_merge_readiness.artifacts import provenance
 from pr_merge_readiness.config import ACTION_REPOSITORY
-from pr_merge_readiness.evaluate import assess
+from pr_merge_readiness.publish import DECISION_LABELS
+from tests.test_collect import FixtureAPI as Reader
 from tests.test_config import ROOT, config_text
-from tests.test_support import ACTION_SHA, BASE, facts, policy, pr_event
+from tests.test_publish import FixtureAPI as Writer
+from tests.test_support import ACTION_SHA, BASE, pr_event
 
 
 @pytest.fixture
@@ -37,8 +38,7 @@ def isolated(tmp_path):
     (tmp_path / ".python-version").write_text("9.99\n")
     tools = tmp_path / "tools"
     tools.mkdir()
-    (tools / "git").symlink_to(shutil.which("git"))
-    # uv/Python が PATH に無くても動き、利用側の Python 設定も参照しない。
+    # Git・uv・Python が PATH に無くても動き、利用側の Python 設定も参照しない。
     return {
         "PATH": str(tools),
         "HOME": str(tmp_path),
@@ -65,12 +65,14 @@ def invoke(binary, tmp_path, isolated, *args, env=None, code=0):
     return result
 
 
-@pytest.mark.parametrize("mode", ["auto", "manual", "off"])
+@pytest.mark.parametrize("approvals", [0, 1, 99])
 def test_binary_validates_config_without_python_or_consumer_imports(
-    binary, tmp_path, isolated, mode
+    binary, tmp_path, isolated, approvals
 ):
     configuration = tmp_path / "config with spaces.toml"
-    configuration.write_text(config_text().replace('labels = "manual"', f'labels = "{mode}"'))
+    configuration.write_text(
+        config_text().replace("minimum_approvals = 0", f"minimum_approvals = {approvals}")
+    )
     result = invoke(binary, tmp_path, isolated, "validate-config", "--config", str(configuration))
     assert json.loads(result.stdout) == {"valid": True}
     configuration.write_text("version = 1\n")
@@ -115,11 +117,13 @@ def test_binary_skips_excluded_pr_without_api_or_python(binary, tmp_path, isolat
     invoke(binary, tmp_path, isolated, "action", env={**env, "PMR_SOURCE_REF": "main"}, code=1)
 
 
-@pytest.mark.parametrize("legacy_config", [True, False])
-def test_binary_reads_config_over_http(binary, tmp_path, isolated, legacy_config):
+def test_binary_rejects_local_action_without_executing_git(binary, tmp_path, isolated):
+    result = invoke(binary, tmp_path, isolated, "action", code=1)
+    assert "local Actions are unsupported" in json.loads(result.stdout)["error"]
+
+
+def test_binary_reads_config_over_http(binary, tmp_path, isolated):
     text = config_text()
-    if legacy_config:
-        text = f'action_ref = "{"e" * 40}"\n' + text
     body = json.dumps(
         {
             "type": "file",
@@ -152,8 +156,8 @@ def test_binary_reads_config_over_http(binary, tmp_path, isolated, legacy_config
                     "GITHUB_REPOSITORY": "example/project",
                     "GITHUB_API_URL": f"http://127.0.0.1:{server.server_port}",
                     "GH_TOKEN": "test-token",
-                    "PMR_OPERATION": "validate-config",
-                    "PMR_CONFIG_SHA": BASE,
+                    "GITHUB_EVENT_NAME": "push",
+                    "GITHUB_SHA": BASE,
                     "PMR_SOURCE_REF": ACTION_SHA,
                     "PMR_SOURCE_REPOSITORY": ACTION_REPOSITORY,
                 },
@@ -167,57 +171,88 @@ def test_binary_reads_config_over_http(binary, tmp_path, isolated, legacy_config
             thread.join()
 
 
-def test_binary_replays_archived_evaluator_without_python(binary, tmp_path, isolated):
-    source = tmp_path / "trusted-source"
-    package = source / "pr_merge_readiness"
-    package.mkdir(parents=True)
-    for name in ("__init__.py", "contracts.py", "evaluate.py"):
-        text = (ROOT / "pr_merge_readiness" / name).read_text()
-        # バイナリ内の評価器では得られない結果を作り、Git のコード使用を確認する。
-        text = text.replace("PR and reviews must agree in both samples", "ARCHIVED_EVALUATOR")
-        (package / name).write_text(text)
+def test_binary_observes_and_updates_labels_over_http(binary, tmp_path, isolated):
+    reader, writer = Reader(), Writer()
+    writer.pulls[1]["base"]["ref"] = reader.state["baseRefName"]
+    paths = []
 
-    def git(*args):
-        return subprocess.run(
-            ["git", "-C", str(source), *args], check=True, capture_output=True, text=True
-        ).stdout.strip()
+    class Handler(BaseHTTPRequestHandler):
+        def respond(self):
+            paths.append(self.path)
+            path = urlsplit(self.path).path
+            body = (
+                json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                if self.headers.get("Content-Length")
+                else None
+            )
+            assert self.headers["Authorization"] == "Bearer test-token"
+            if path == "/graphql":
+                if "reviewThreads(" in body["query"]:
+                    pr = {
+                        "reviewThreads": {
+                            "totalCount": 1,
+                            "nodes": [{"isResolved": True}],
+                            "pageInfo": {"endCursor": None, "hasNextPage": False},
+                        }
+                    }
+                else:
+                    pr = reader.state
+                value = {"data": {"repository": {"pullRequest": pr}}}
+            elif path == reader.prefix:
+                value = {"default_branch": "trunk"}
+            elif path == reader.prefix + "/git/ref/heads/trunk":
+                value = {"object": {"sha": BASE}}
+            elif "/contents/" in path:
+                value = {
+                    "type": "file",
+                    "encoding": "base64",
+                    "content": base64.b64encode(config_text().encode()).decode(),
+                }
+            elif "/commits?" in self.path:
+                value = reader.request(self.path)
+            elif path.endswith(("/files", "/reviews")):
+                value = reader.pages(path.removeprefix(reader.prefix))
+            else:
+                value = writer.request(path, body, method=self.command)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps(value).encode())
 
-    git("init", "-q")
-    git("add", "pr_merge_readiness")
-    git(
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@example.invalid",
-        "-c",
-        "commit.gpgsign=false",
-        "commit",
-        "-qm",
-        "Trusted evaluator",
-    )
-    trusted = git("rev-parse", "HEAD")
-    report = {
-        **assess(facts(), policy()),
-        "provenance": provenance("example/project", trusted, BASE, ".github/config.toml"),
-    }
-    report["conditions"][0]["detail"] = "ARCHIVED_EVALUATOR"
-    report_path = tmp_path / "pr-1.json"
-    report_path.write_text(json.dumps(report))
-    (package / "evaluate.py").write_text('raise RuntimeError("untrusted working tree")\n')
-    args = [
-        "replay",
-        "--report",
-        str(report_path),
-        "--source-dir",
-        str(source),
-        "--source-repository",
-        ACTION_REPOSITORY,
-        "--action-sha",
-        trusted,
-    ]
-    result = invoke(binary, tmp_path, isolated, *args)
-    assert json.loads(result.stdout)["matches"] is True
-    report["decision"] = "WAITING"
-    report_path.write_text(json.dumps(report))
-    result = invoke(binary, tmp_path, isolated, *args, code=1)
-    assert json.loads(result.stdout)["matches"] is False
+        do_GET = do_POST = respond
+
+        def log_message(self, *_):
+            pass
+
+    event = tmp_path / "event.json"
+    event.write_text('{"inputs":{"pr-number":"1"}}')
+    summary = tmp_path / "summary"
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            endpoint = f"http://127.0.0.1:{server.server_port}"
+            result = invoke(
+                binary,
+                tmp_path,
+                isolated,
+                "action",
+                env={
+                    "GITHUB_REPOSITORY": reader.repository,
+                    "GITHUB_API_URL": endpoint,
+                    "GITHUB_GRAPHQL_URL": endpoint + "/graphql",
+                    "GITHUB_EVENT_NAME": "workflow_dispatch",
+                    "GITHUB_EVENT_PATH": str(event),
+                    "GITHUB_STEP_SUMMARY": str(summary),
+                    "GH_TOKEN": "test-token",
+                    "PMR_SOURCE_REF": ACTION_SHA,
+                    "PMR_SOURCE_REPOSITORY": ACTION_REPOSITORY,
+                },
+            )
+            assert json.loads(result.stdout) == {"pr": 1, "publication": "updated"}
+            assert writer.names() == [DECISION_LABELS["SHADOW_CONDITIONS_MET"]]
+            assert "SHADOW_CONDITIONS_MET" in summary.read_text()
+            assert sum("/contents/" in path for path in paths) == 1
+            assert not any("check-runs" in path for path in paths)
+        finally:
+            server.shutdown()
+            thread.join()
