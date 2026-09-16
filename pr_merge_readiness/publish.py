@@ -18,23 +18,24 @@ MAX_PAGES = 30
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 DECISION_LABELS = {
-    "SHADOW_CONDITIONS_MET": "shadow/レビュー条件充足",
+    "SHADOW_CONDITIONS_MET": "shadow/要対応事項なし",
     "WAITING": "shadow/レビュー待ち",
     "HUMAN_REVIEW_REQUIRED": "shadow/要対応",
     "INSUFFICIENT_DATA": "shadow/再観測が必要",
 }
-# 次の手動同期でCIを含む旧表示を取り除く。旧ラベルは作成しない。
-RETIRED_LABELS = {"shadow/要マージ判断", "shadow/CI・レビュー待ち"}
+# 自動更新または手動同期で対象PRから旧表示を取り除く。旧ラベルは作成しない。
+RETIRED_LABELS = {"shadow/要マージ判断", "shadow/CI・レビュー待ち", "shadow/レビュー条件充足"}
 MANAGED_LABELS = set(DECISION_LABELS.values()) | RETIRED_LABELS
 LABEL_COLORS = {
-    "shadow/レビュー条件充足": "0E8A16",
+    "shadow/要対応事項なし": "0E8A16",
     "shadow/レビュー待ち": "FBCA04",
     "shadow/要対応": "D93F0B",
     "shadow/再観測が必要": "BFD4F2",
 }
 LABEL_DESCRIPTIONS = {
-    "shadow/レビュー条件充足": (
-        "直近の観測でレビュー・変更履歴の条件を満たす。詳細はActionsのPR Merge Readiness。"
+    "shadow/要対応事項なし": (
+        "自動確認の範囲で、承認待ち・未解決の指摘・追加確認事項がありません。"
+        "コードの内容は評価していません。詳細はActionsのPR Merge Readiness。"
     ),
     "shadow/レビュー待ち": ("直近の観測。レビュー承認を待つ。詳細はActionsのPR Merge Readiness。"),
     "shadow/要対応": (

@@ -298,12 +298,15 @@ def test_closed_listing_reads_all_pages_and_rejects_truncation():
             api.pages("/issues?state=closed")
 
 
-def test_manual_sync_removes_retired_ci_labels_without_recreating_them():
-    api = FixtureAPI(["shadow/CI・レビュー待ち", "shadow/要マージ判断", "bug"])
+@pytest.mark.parametrize("expected_head", [None, HEAD])
+def test_sync_removes_retired_labels_without_recreating_them(expected_head):
+    api = FixtureAPI(
+        ["shadow/CI・レビュー待ち", "shadow/要マージ判断", "shadow/レビュー条件充足", "bug"]
+    )
     api.definitions.clear()
     ensure_labels(api)
-    publish_pr(api, 1, report("SHADOW_CONDITIONS_MET"))
-    assert api.names() == ["bug", "shadow/レビュー条件充足"]
+    publish_pr(api, 1, report("SHADOW_CONDITIONS_MET"), expected_head=expected_head)
+    assert api.names() == ["bug", "shadow/要対応事項なし"]
     assert api.definitions == set(DECISION_LABELS.values())
 
 
