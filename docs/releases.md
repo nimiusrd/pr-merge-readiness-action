@@ -33,7 +33,7 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 2. Actions の **Release → Run workflow** で main を選び、未使用の `vMAJOR.MINOR.PATCH` を入力します。タグ名は Action の配布版を識別します。Python パッケージを PyPI に公開する処理はありません。
 3. `build` job が source のテスト・静的検査、バイナリのビルド・テストを両 CPU で実行します。成功したバイナリと checksum を同じ run の artifact として保存します。
 4. `publish` job が main の先端とビルド対象のソース SHA の一致を確認し、同じ run の artifact だけを一時ディレクトリに取得します。checksum を検証し、`dist/` の2つのバイナリと checksum を置き換えます。変更があればソースコミットを親とする**配布用コミット**を作り、main の更新とそのコミットを指すタグの作成を atomic push で同時に公開してから、GitHub Release を作成します。バイナリと checksum が既存の内容と同じ場合は、現在の main コミットにタグを付けます。
-5. リリースノートの配布用コミット SHA を確認し、README・利用例・このリポジトリ自身の workflow の参照 SHA を更新します。利用側が version 2 の場合は、[移行手順](workflow.md#version-2-からの移行)に従って設定と workflow を同時に更新します。新しい設定だけを旧バイナリへ先行導入しないでください。
+5. リリースノートの配布用コミット SHA を確認し、README・利用例・このリポジトリ自身の workflow の参照 SHA を更新します。設定 version が変わる場合は、[移行手順](workflow.md#version-3-から-version-4-への移行)に従って設定と workflow を同時に更新します。このソースの公開時は、本リポジトリの `.github/pr-merge-readiness.toml` も version 4 へ変更し、削除済みの2項目を除きます。例の `<RELEASE_COMMIT_SHA>` もこの時点で置き換えます。新しい設定だけを旧バイナリへ先行導入しないでください。
 
 ソースコミットと配布用コミットはどちらも main の履歴に残ります。リリースノートにはビルド対象のソース SHA と公開した配布用 SHA を記載します。**Action にはリリースタグが指す40桁 SHA を指定してください。** リリース後の main にはソースだけを変更するコミットも入るため、任意の main の SHA では同梱バイナリとソースの対応を保証できません。`run.sh` はソースから動かす開発用 CLI として残します。
 

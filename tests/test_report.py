@@ -7,9 +7,8 @@ from tests.test_support import HEAD, facts, policy
 
 def result(data):
     return {
-        "decision": "WAITING",
-        "label_assessment": {"decision": "SHADOW_CONDITIONS_MET", "conditions": []},
-        "conditions": [{"name": "example", "status": "waiting", "detail": "reason"}],
+        "decision": "HUMAN_REVIEW_REQUIRED",
+        "conditions": [{"name": "example", "status": "blocked", "detail": "reason"}],
         "observations": data,
         "policy": policy(),
     }
@@ -45,7 +44,7 @@ def test_missing_null_and_empty_diagnostics_keep_distinct_meanings(diagnostic, e
     value = result({**facts(), **diagnostic})
     value["policy"] = {}
     assert expected in markdown(value)
-    assert value["decision"] == "WAITING"
+    assert value["decision"] == "HUMAN_REVIEW_REQUIRED"
 
 
 def test_partial_failed_observation_renders_without_filling_missing_data():
@@ -57,10 +56,9 @@ def test_partial_failed_observation_renders_without_filling_missing_data():
     assert "pr" not in value["observations"]
 
 
-def test_summary_distinguishes_pr_and_label_assessments():
+def test_summary_limits_the_decision_to_additional_history_review():
     text = markdown(result(facts()))
-    assert "判定: <code>&quot;WAITING&quot;</code>" in text
-    assert (
-        "ラベル用判定（レビュー・変更履歴のみ）: <code>&quot;SHADOW_CONDITIONS_MET&quot;</code>"
-        in text
-    )
+    assert "追加確認の判定:" in text
+    assert "GitHub Ruleset" in text
+    assert "レビュー完了やマージ許可を示すものではありません" in text
+    assert "ラベル用判定" not in text

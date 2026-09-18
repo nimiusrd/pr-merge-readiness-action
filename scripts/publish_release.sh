@@ -41,7 +41,7 @@ cat > "$notes" <<EOF
 
 Linux x64 / arm64 用の Python 3.14 同梱バイナリです。
 利用側の uses を配布用コミット $release_sha に固定してください。
-設定 version 3 が必要です。docs/workflow.md に従って設定と workflow を同時に移行してください。
+設定 version 4 が必要です。docs/workflow.md に従って設定と workflow を同時に移行してください。
 実行時に uv・Python の導入やビルドは行いません。
 EOF
 for platform in linux-x64 linux-arm64; do

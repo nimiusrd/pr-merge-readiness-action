@@ -35,7 +35,7 @@ def check_action_flow(action: dict[str, Any]) -> None:
     }
 
 
-def check_runtime(workflow: dict[str, Any]) -> None:
+def check_runtime(workflow: dict[str, Any], *, allow_placeholder: bool = False) -> None:
     assert workflow["permissions"] == {}
     assert "concurrency" not in workflow
     assert set(workflow["jobs"]) == {"readiness"}
@@ -55,7 +55,8 @@ def check_runtime(workflow: dict[str, Any]) -> None:
     assert len(job["steps"]) == 1
     assert set(job["steps"][0]) == {"uses"}
     reference = job["steps"][0]["uses"]
-    assert re.fullmatch(re.escape(ACTION_REPOSITORY) + r"@[0-9a-f]{40}", reference)
+    if not (allow_placeholder and reference == ACTION_REPOSITORY + "@<RELEASE_COMMIT_SHA>"):
+        assert re.fullmatch(re.escape(ACTION_REPOSITORY) + r"@[0-9a-f]{40}", reference)
 
 
 def main() -> None:
@@ -71,7 +72,7 @@ def main() -> None:
     for name in action["outputs"]:
         assert action["outputs"][name]["value"] == "${{ steps.run.outputs." + name + " }}"
     example = load(ROOT / "examples/pr-merge-readiness.yml")
-    check_runtime(example)
+    check_runtime(example, allow_placeholder=True)
     assert set(example["on"]) == {
         "workflow_dispatch",
         "pull_request",
@@ -92,16 +93,15 @@ def main() -> None:
     assert len(snippets) == 1
     quickstart = yaml.load(snippets[0], Loader=yaml.BaseLoader)
     assert quickstart == example
-    check_runtime(quickstart)
+    check_runtime(quickstart, allow_placeholder=True)
     workflows = [example, quickstart]
     for path in (ROOT / ".github/workflows").glob("*.yml"):
         workflow = load(path)
         workflows.append(workflow)
         if path.name == "pr-merge-readiness.yml":
-            settings = tomllib.loads((ROOT / ".github/pr-merge-readiness.toml").read_text())
-            validate_config(settings)
+            # 運用設定は固定された配布版が検証する。ソースの設定契約はexamplesで検証する。
             check_runtime(workflow)
-            assert workflow == example
+            assert workflow["on"] == example["on"]
     steps = list(action["runs"]["steps"])
     for workflow in workflows:
         assert "on" in workflow and "jobs" in workflow
@@ -109,10 +109,16 @@ def main() -> None:
         for job in workflow["jobs"].values():
             assert "uses" not in job  # 全て通常の job から step として呼ぶ。
             steps.extend(job["steps"])
+    template_steps = [
+        example["jobs"]["readiness"]["steps"][0],
+        quickstart["jobs"]["readiness"]["steps"][0],
+    ]
     uv_setups = 0
     for step in steps:
         uses = step.get("uses", "")
-        if uses:
+        if uses == ACTION_REPOSITORY + "@<RELEASE_COMMIT_SHA>":
+            assert any(step is template for template in template_steps)
+        elif uses:
             assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", uses), uses
         assert not uses.startswith("actions/setup-python@")
         if uses.startswith(ACTION_REPOSITORY + "@"):

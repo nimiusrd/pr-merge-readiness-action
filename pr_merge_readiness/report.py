@@ -17,11 +17,9 @@ def markdown(result: Assessment) -> str:
     lines = [
         "## PR Merge Readiness",
         "",
-        "PR・レビュー・変更履歴の観測時点の仮判定です。CI の結果は GitHub Checks で確認してください。マージ許可・安全性の証明には使用しません。",
+        "変更履歴に基づく追加確認の観測時点の判定です。承認数・会話解決・CI などのマージ条件は GitHub Ruleset で確認してください。レビュー完了やマージ許可を示すものではありません。",
         "",
-        "判定: " + safe(result["decision"]),
-        "",
-        "ラベル用判定（レビュー・変更履歴のみ）: " + safe(result["label_assessment"]["decision"]),
+        "追加確認の判定: " + safe(result["decision"]),
         "",
         "観測時刻: " + safe(facts.get("observed_at")),
         "",

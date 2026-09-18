@@ -1,5 +1,5 @@
 name: PR Merge Readiness
-description: PR のレビュー条件を判定し、ラベルと実行サマリーを更新します。
+description: PR の変更履歴に基づく追加確認を判定し、ラベルと実行サマリーを更新します。
 author: nimiusrd
 inputs:
   config-path:

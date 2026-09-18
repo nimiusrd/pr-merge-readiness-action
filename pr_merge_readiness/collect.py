@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
 from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -23,21 +22,21 @@ from .contracts import (
     ObservationChange,
     Observations,
     PullRequest,
+    Policy,
     file_history_path,
     sha,
     string,
     timestamp,
 )
 
+from .evaluate import change_ages
+
 MAX_PAGES = 30
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_HISTORY_FILES = 100
 MAX_HISTORY_REQUESTS = 100
-MERGEABILITY_RETRIES = 5
-MERGEABILITY_RETRY_SECONDS = 2
 PR_FIELDS = """
-number state isDraft headRefOid baseRefOid baseRefName updatedAt
-mergeable reviewDecision
+number state headRefOid baseRefOid baseRefName updatedAt
 additions deletions changedFiles
 """
 
@@ -107,57 +106,27 @@ class GitHub:
                 return records
         raise CollectionError("REST pagination limit exceeded")
 
-    def graphql(self, number: int, selection: str, cursor: str | None = None) -> dict[str, Any]:
+    def graphql(self, number: int, selection: str) -> dict[str, Any]:
         query = """
-query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) { SELECTION }
   }
 }
 """.replace("SELECTION", selection)
-        # PR state queryに未使用の変数宣言を残さない。
-        if "$cursor" not in selection:
-            query = query.replace(", $cursor: String", "")
-        variables: dict[str, Any] = {"owner": self.owner, "repo": self.repo, "number": number}
-        if "$cursor" in selection:
-            variables["cursor"] = cursor
+        variables = {"owner": self.owner, "repo": self.repo, "number": number}
         result = self.request("/graphql", {"query": query, "variables": variables})
         return cast(dict[str, Any], result["data"]["repository"]["pullRequest"])
-
-    def connection(self, number: int, name: str, fields: str) -> list[dict[str, Any]]:
-        records = []
-        cursor = None
-        for _ in range(MAX_PAGES):
-            result = self.graphql(
-                number,
-                f"{name}(first: 100, after: $cursor) {{ totalCount nodes {{ {fields} }} pageInfo {{ endCursor hasNextPage }} }}",
-                cursor,
-            )
-            connection = result[name]
-            records.extend(connection["nodes"])
-            info = connection["pageInfo"]
-            if info["hasNextPage"] is False:
-                if connection["totalCount"] != len(records):
-                    raise CollectionError("GraphQL collection count mismatch")
-                return records
-            next_cursor = info["endCursor"]
-            if not next_cursor or next_cursor == cursor:
-                raise CollectionError("invalid GraphQL cursor")
-            cursor = next_cursor
-        raise CollectionError("GraphQL pagination limit exceeded")
 
 
 def normalized_pr(raw: dict[str, Any]) -> PullRequest:
     return {
         "number": raw["number"],
         "state": raw["state"],
-        "draft": raw["isDraft"],
         "head_sha": sha(raw["headRefOid"]),
         "base_sha": sha(raw["baseRefOid"]),
         "base_ref": raw["baseRefName"],
         "updated_at": raw["updatedAt"],
-        "mergeable": raw["mergeable"],
-        "review_decision": raw["reviewDecision"],
         "additions": raw["additions"],
         "deletions": raw["deletions"],
         "changed_files": raw["changedFiles"],
@@ -165,15 +134,7 @@ def normalized_pr(raw: dict[str, Any]) -> PullRequest:
 
 
 def read_pr(api: GitHub, number: int) -> PullRequest:
-    """open PRの競合判定が計算中なら、上限付きで確定を待つ。"""
-    pr = normalized_pr(api.graphql(number, PR_FIELDS))
-    for _ in range(MERGEABILITY_RETRIES):
-        if pr["state"] != "OPEN" or pr["mergeable"] != "UNKNOWN":
-            break
-        time.sleep(MERGEABILITY_RETRY_SECONDS)
-        # 判定値だけでなくhead・base等も読み直し、古い対象へ結果を流用しない。
-        pr = normalized_pr(api.graphql(number, PR_FIELDS))
-    return pr
+    return normalized_pr(api.graphql(number, PR_FIELDS))
 
 
 def decision_metadata(
@@ -181,7 +142,7 @@ def decision_metadata(
     number: int,
 ) -> DecisionMetadata:
     """判定に使うレビュー状態を同じ方法で再取得できるようにする。"""
-    metadata: DecisionMetadata = {"reviews": [], "unresolved_threads": 0}
+    metadata: DecisionMetadata = {"reviews": []}
     reviews = api.pages(f"/pulls/{number}/reviews")
     metadata["reviews"] = [
         {
@@ -195,10 +156,6 @@ def decision_metadata(
         }
         for r in reviews
     ]
-    threads = api.connection(number, "reviewThreads", "isResolved")
-    if any(type(t["isResolved"]) is not bool for t in threads):
-        raise CollectionError("invalid review thread state")
-    metadata["unresolved_threads"] = sum(not t["isResolved"] for t in threads)
     metadata["reviews"].sort(key=lambda item: json.dumps(item, sort_keys=True))
     return metadata
 
@@ -226,11 +183,6 @@ def observation_changes(before: dict[str, Any], after: dict[str, Any]) -> list[O
                 )
 
     compare("pr", before["pr"], after["pr"])
-    compare(
-        "unresolved_threads",
-        {"count": before["unresolved_threads"]},
-        {"count": after["unresolved_threads"]},
-    )
     for group in ("reviews",):
         keys = ("id",)
         old = {tuple(r[k] for k in keys): r for r in before[group]}
@@ -308,16 +260,16 @@ def collect(
     api: GitHub,
     number: int,
     *,
+    policy: Policy,
     history_collector: ChangeHistoryCollector | None = None,
     expected_head: str | None = None,
 ) -> Observations:
     facts: Observations = {
-        "schema_version": 2,
+        "schema_version": 3,
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "repository": api.repository,
         "collection_errors": [],
         "stable": False,
-        "review_stable": False,
         "observation_changes": None,
     }
     try:
@@ -325,7 +277,7 @@ def collect(
         if expected_head is not None and before["head_sha"] != expected_head:
             raise ProposalHeadChanged("PR head differs from validated proposal before observation")
         facts["pr"] = before
-        # RESTの旧pathも使い、workflowディレクトリ外へのrenameを取りこぼさない。
+        # rename前のpathを使い、baseでの変更履歴を取得する。
         # 同梱されるpatchやsource URLは参照・保存しない。
         files: list[ChangedFile] = []
         for raw in api.pages(f"/pulls/{number}/files"):
@@ -357,69 +309,54 @@ def collect(
             "mode_changes": None,
         }
         facts["files"] = files
-        # GitHub Actionsの共通規約。コードベース固有の重要pathは持たない。
-        facts["ci_definition_changes"] = sorted(
-            {
-                path
-                for file in files
-                for path in (file["path"], file["previous_path"])
-                if path is not None and path.startswith(".github/workflows/")
-            }
-        )
         if any(
             facts["change"][key] != before[key]
             for key in ("changed_files", "additions", "deletions")
         ):
             raise CollectionError("PR file totals mismatch")
-        initial_metadata = decision_metadata(
-            api,
-            number,
-        )
-        facts["reviews"] = initial_metadata["reviews"]
-        facts["unresolved_threads"] = initial_metadata["unresolved_threads"]
         collector = (
             history_collector if history_collector is not None else ChangeHistoryCollector(api)
         )
         facts["change_history"] = collector.collect(before["base_sha"], files)
-        confirmed_metadata = decision_metadata(
-            api,
-            number,
+        facts["observed_at"] = datetime.now(timezone.utc).isoformat()
+        needs_review = any(
+            file["status"] == "stale"
+            for file in change_ages(facts, policy["stale_change_review_days"])
         )
+        # 履歴条件が承認を要求する場合だけレビューを読む。
+        initial_metadata = decision_metadata(api, number) if needs_review else {"reviews": []}
+        facts["reviews"] = initial_metadata["reviews"]
+        confirmed_metadata = decision_metadata(api, number) if needs_review else {"reviews": []}
         after = read_pr(api, number)
         if expected_head is not None and after["head_sha"] != expected_head:
             raise ProposalHeadChanged(
                 "PR head changed after proposal validation during observation"
             )
-        facts["rechecked"] = {
-            # 更新時刻だけでは判定に使う内容の変化を示さない。差分には残す。
-            "pr": {key: value for key, value in before.items() if key != "updated_at"}
-            == {key: value for key, value in after.items() if key != "updated_at"},
-            "reviews": initial_metadata["reviews"] == confirmed_metadata["reviews"],
-            "unresolved_threads": initial_metadata["unresolved_threads"]
-            == confirmed_metadata["unresolved_threads"],
-        }
-        facts["stable"] = all(facts["rechecked"].values())
-        # PRの表示状態と更新時刻はラベルに使わない。レビュー対象と内容の一致は必要。
-        review_pr_fields = (
+        # PRの表示状態・更新時刻は追加確認の入力に含めない。
+        target_fields = (
             "number",
             "head_sha",
             "base_sha",
             "base_ref",
-            "review_decision",
             "additions",
             "deletions",
             "changed_files",
         )
-        facts["review_stable"] = (
-            all(before.get(key) == after.get(key) for key in review_pr_fields)
-            and facts["rechecked"]["reviews"]
-            and facts["rechecked"]["unresolved_threads"]
-        )
+        facts["rechecked"] = {
+            "pr": all(before.get(key) == after.get(key) for key in target_fields),
+            "reviews": initial_metadata["reviews"] == confirmed_metadata["reviews"],
+        }
+        facts["stable"] = all(facts["rechecked"].values())
         facts["observation_changes"] = observation_changes(
             {"pr": before, **initial_metadata},
             {"pr": after, **confirmed_metadata},
         )
         facts["observed_at"] = datetime.now(timezone.utc).isoformat()
+        if not needs_review and any(
+            file["status"] == "stale"
+            for file in change_ages(facts, policy["stale_change_review_days"])
+        ):
+            raise CollectionError("history review threshold crossed during observation")
     except ProposalHeadChanged:
         raise
     except (CollectionError, KeyError, TypeError, ValueError) as error:

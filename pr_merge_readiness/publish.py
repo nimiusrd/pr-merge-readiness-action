@@ -19,31 +19,32 @@ MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 DECISION_LABELS = {
     "SHADOW_CONDITIONS_MET": "shadow/要対応事項なし",
-    "WAITING": "shadow/レビュー待ち",
     "HUMAN_REVIEW_REQUIRED": "shadow/要対応",
     "INSUFFICIENT_DATA": "shadow/再観測が必要",
 }
 # 自動更新または手動同期で対象PRから旧表示を取り除く。旧ラベルは作成しない。
-RETIRED_LABELS = {"shadow/要マージ判断", "shadow/CI・レビュー待ち", "shadow/レビュー条件充足"}
+RETIRED_LABELS = {
+    "shadow/レビュー待ち",
+    "shadow/要マージ判断",
+    "shadow/CI・レビュー待ち",
+    "shadow/レビュー条件充足",
+}
 MANAGED_LABELS = set(DECISION_LABELS.values()) | RETIRED_LABELS
 LABEL_COLORS = {
     "shadow/要対応事項なし": "0E8A16",
-    "shadow/レビュー待ち": "FBCA04",
     "shadow/要対応": "D93F0B",
     "shadow/再観測が必要": "BFD4F2",
 }
 LABEL_DESCRIPTIONS = {
     "shadow/要対応事項なし": (
-        "自動確認の範囲で、承認待ち・未解決の指摘・追加確認事項がありません。"
-        "コードの内容は評価していません。詳細はActionsのPR Merge Readiness。"
-    ),
-    "shadow/レビュー待ち": ("直近の観測。レビュー承認を待つ。詳細はActionsのPR Merge Readiness。"),
-    "shadow/要対応": (
-        "直近の観測。変更要求・未解決スレッド・変更履歴・CI定義の変更に対応が必要。"
+        "変更履歴に基づく追加確認事項はありません。GitHubのマージ条件は別途確認してください。"
         "詳細はActionsのPR Merge Readiness。"
     ),
+    "shadow/要対応": (
+        "変更履歴に基づく追加の人間レビューが必要。詳細はActionsのPR Merge Readiness。"
+    ),
     "shadow/再観測が必要": (
-        "直近のレビュー対象・レビュー・変更履歴の観測が失敗または鮮度不足。"
+        "追加確認の観測が失敗、または対象・承認情報が変化。"
         "ActionsのPR Merge Readinessを手動で再実行する。"
     ),
 }
@@ -157,10 +158,7 @@ def desired_label(
     report: Assessment, current: dict[str, Any], repository: str, number: int
 ) -> str | None:
     """fork・Dependabot以外のopen PRへ付与し、対象外のPRは管理ラベルを清掃する。"""
-    assessment = report.get("label_assessment")
-    if not isinstance(assessment, dict):
-        raise PublishError("missing label assessment")
-    decision = assessment.get("decision")
+    decision = report.get("decision")
     if not isinstance(decision, str) or decision not in DECISION_LABELS:
         raise PublishError(f"unknown label decision: {decision}")
     facts: Mapping[str, Any] = report.get("observations") or {}

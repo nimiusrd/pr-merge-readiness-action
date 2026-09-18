@@ -1,6 +1,4 @@
-version = 3
+version = 4
 
 [review]
-minimum_approvals = 1
-require_resolved_threads = true
 stale_change_review_days = 14

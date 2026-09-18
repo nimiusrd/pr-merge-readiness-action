@@ -4,11 +4,10 @@ import pytest
 import io
 import json
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from urllib.error import HTTPError
 from pr_merge_readiness.collect import (
-    MERGEABILITY_RETRIES,
-    MERGEABILITY_RETRY_SECONDS,
     CollectionError,
     GitHub,
     collect,
@@ -55,7 +54,16 @@ class FixtureAPI:
         ]
 
     def request(self, path, body=None):
-        return [{"sha": BASE, "commit": {"committer": {"date": "2026-09-01T12:00:00Z"}}}]
+        return [
+            {
+                "sha": BASE,
+                "commit": {
+                    "committer": {
+                        "date": (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+                    }
+                },
+            }
+        ]
 
     def graphql(self, number, selection):
         self.reads += 1
@@ -63,12 +71,9 @@ class FixtureAPI:
             self.state.update(self.drift)
         return deepcopy(self.state)
 
-    def connection(self, number, name, fields):
+    def pages(self, path, key=None):
         if self.failure:
             raise CollectionError(self.failure)
-        return [{"isResolved": True} for _ in range(254)]
-
-    def pages(self, path, key=None):
         self.paths.append(path)
         if path.endswith("/files"):
             return deepcopy(self.files)
@@ -106,70 +111,25 @@ class FixtureAPI:
         },
     ],
 )
-def test_workflow_definition_changes_require_review(change):
+def test_workflow_paths_do_not_create_additional_requirements(change):
     api = FixtureAPI()
     api.files[0].update(change)
-    result = collect(api, 1)
+    result = collect(api, 1, policy=policy())
     assert not result["collection_errors"]
-    assert result["ci_definition_changes"]
-    assert assess(result, policy())["decision"] == "HUMAN_REVIEW_REQUIRED"
+    assert "ci_definition_changes" not in result
+    assert assess(result, policy())["decision"] == "SHADOW_CONDITIONS_MET"
 
 
 def test_rename_requires_previous_path_and_preserves_ordinary_changes():
     api = FixtureAPI()
     api.files[0].update(status="renamed", previous_filename="before.rs")
-    result = collect(api, 1)
+    result = collect(api, 1, policy=policy())
     assert result["files"][0]["previous_path"] == "before.rs"
-    assert result["ci_definition_changes"] == []
+    assert "ci_definition_changes" not in result
     assert "patch" not in result["files"][0]
     assert assess(result, policy())["decision"] == "SHADOW_CONDITIONS_MET"
     del api.files[0]["previous_filename"]
-    assert assess(collect(api, 1), policy())["decision"] == "INSUFFICIENT_DATA"
-
-
-def test_reviews_and_thread_resolution_are_also_rechecked():
-    api = FixtureAPI()
-    original = api.pages
-
-    def changing_reviews(path, key=None):
-        records = original(path, key)
-        if path.endswith("/reviews") and api.paths.count(path) == 2:
-            records[0]["state"] = "CHANGES_REQUESTED"
-        return records
-
-    api.pages = changing_reviews
-    facts = collect(api, 1)
-    assert assess(facts, policy())["decision"] == "INSUFFICIENT_DATA"
-    assert assess(facts, policy())["label_assessment"]["decision"] == "INSUFFICIENT_DATA"
-    assert facts["observation_changes"][0] == {
-        "group": "reviews",
-        "identity": {"id": 1, "author": "reviewer"},
-        "field": "state",
-        "before": "APPROVED",
-        "after": "CHANGES_REQUESTED",
-    }
-    api = FixtureAPI()
-    original_connection = api.connection
-    thread_reads = 0
-
-    def changing_threads(number, name, fields):
-        nonlocal thread_reads
-        records = original_connection(number, name, fields)
-        if name == "reviewThreads":
-            thread_reads += 1
-            if thread_reads == 2:
-                records[0]["isResolved"] = False
-        return records
-
-    api.connection = changing_threads
-    result = collect(api, 1)
-    assert not result["rechecked"]["unresolved_threads"]
-    assert not result["review_stable"]
-    assert assess(result, policy())["label_assessment"]["decision"] == "INSUFFICIENT_DATA"
-    assert result["observation_changes"] == [
-        {"group": "unresolved_threads", "identity": None, "field": "count", "before": 0, "after": 1}
-    ]
-    assert assess(result, policy())["decision"] == "INSUFFICIENT_DATA"
+    assert assess(collect(api, 1, policy=policy()), policy())["decision"] == "INSUFFICIENT_DATA"
 
 
 def test_metadata_order_changes_do_not_invalidate_observation():
@@ -181,7 +141,12 @@ def test_metadata_order_changes_do_not_invalidate_observation():
         return list(reversed(records)) if api.paths.count(path) == 2 else records
 
     api.pages = reordered
-    assert assess(collect(api, 1), policy())["decision"] == "SHADOW_CONDITIONS_MET"
+    assert (
+        assess(
+            collect(api, 1, policy={"stale_change_review_days": 1}), {"stale_change_review_days": 1}
+        )["decision"]
+        == "SHADOW_CONDITIONS_MET"
+    )
 
 
 def test_removed_records_and_summary_escape_only_normalized_metadata():
@@ -198,7 +163,9 @@ def test_removed_records_and_summary_escape_only_normalized_metadata():
 
     api.pages = changing
     api.drift = {"baseRefName": "<script>alert(1)</script>"}
-    result = assess(collect(api, 1), policy())
+    result = assess(
+        collect(api, 1, policy={"stale_change_review_days": 1}), {"stale_change_review_days": 1}
+    )
     changes = result["observations"]["observation_changes"]
     assert changes[0]["field"] == "base_ref"
     assert changes[0]["before"] == "trunk"
@@ -253,27 +220,14 @@ def test_declared_totals_must_match_collected_records():
     with patch.object(api, "request", return_value={"total_count": 3, "check_runs": [{}]}):
         with pytest.raises(CollectionError, match="count mismatch"):
             api.pages("/commits/sha/check-runs", "check_runs")
-    with patch.object(
-        api,
-        "graphql",
-        return_value={
-            "files": {
-                "totalCount": 2,
-                "nodes": [{}],
-                "pageInfo": {"hasNextPage": False, "endCursor": "end"},
-            }
-        },
-    ):
-        with pytest.raises(CollectionError, match="count mismatch"):
-            api.connection(1, "files", "path")
     api = FixtureAPI()
     api.state["changedFiles"] = 2
-    assert "totals mismatch" in collect(api, 1)["collection_errors"][0]
+    assert "totals mismatch" in collect(api, 1, policy=policy())["collection_errors"][0]
 
 
 def test_collects_only_metadata_and_preserves_observations():
     api = FixtureAPI()
-    facts = collect(api, 1)
+    facts = collect(api, 1, policy=policy())
     assert facts["stable"]
     assert facts["pr"]["base_ref"] == "trunk"
     assert facts["change"]["additions"] == 3
@@ -288,22 +242,19 @@ def test_collects_only_metadata_and_preserves_observations():
     [
         {"headRefOid": "d" * 40},
         {"baseRefOid": "d" * 40},
-        {"isDraft": True},
-        {"reviewDecision": "CHANGES_REQUESTED"},
     ],
 )
-def test_head_base_draft_or_review_changes_invalidate_collection(drift):
+def test_head_or_base_changes_invalidate_collection(drift):
     api = FixtureAPI()
     api.drift = {"updatedAt": "2026-09-11T13:00:00Z", **drift}
-    assert assess(collect(api, 1), policy())["decision"] == "INSUFFICIENT_DATA"
+    assert assess(collect(api, 1, policy=policy()), policy())["decision"] == "INSUFFICIENT_DATA"
 
 
 def test_updated_at_only_change_is_recorded_without_invalidating_observation():
     api = FixtureAPI()
     api.drift = {"updatedAt": "2026-09-11T12:01:00Z"}
-    facts = collect(api, 1)
+    facts = collect(api, 1, policy=policy())
     assert facts["stable"]
-    assert facts["review_stable"]
     assert facts["observation_changes"] == [
         {
             "group": "pr",
@@ -315,16 +266,14 @@ def test_updated_at_only_change_is_recorded_without_invalidating_observation():
     ]
     result = assess(facts, policy())
     assert result["decision"] == "SHADOW_CONDITIONS_MET"
-    assert result["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
 
 
-def test_errors_cannot_be_confused_with_no_threads():
+def test_collection_errors_cannot_be_confused_with_no_changes():
     api = FixtureAPI()
     api.failure = "API 403"
-    facts = collect(api, 1)
+    facts = collect(api, 1, policy=policy())
     assert facts["collection_errors"] == ["API 403"]
     assert assess(facts, policy())["decision"] == "INSUFFICIENT_DATA"
-    assert assess(facts, policy())["label_assessment"]["decision"] == "INSUFFICIENT_DATA"
 
 
 def test_rest_pages_follow_all_pages():
@@ -344,46 +293,6 @@ def test_pagination_limits_never_return_partial_success():
     ):
         with pytest.raises(CollectionError):
             api.pages("/pulls")
-    with (
-        patch("pr_merge_readiness.collect.MAX_PAGES", 1),
-        patch.object(
-            api,
-            "graphql",
-            return_value={
-                "files": {
-                    "totalCount": 2,
-                    "nodes": [{}],
-                    "pageInfo": {"endCursor": "next", "hasNextPage": True},
-                }
-            },
-        ),
-    ):
-        with pytest.raises(CollectionError):
-            api.connection(1, "files", "path")
-
-
-def test_graphql_threads_are_paginated_past_first_hundred():
-    api = GitHub("example/project")
-    responses = [
-        {
-            "reviewThreads": {
-                "totalCount": 101,
-                "nodes": [{"isResolved": True}] * 100,
-                "pageInfo": {"endCursor": "second", "hasNextPage": True},
-            }
-        },
-        {
-            "reviewThreads": {
-                "totalCount": 101,
-                "nodes": [{"isResolved": False}],
-                "pageInfo": {"endCursor": "end", "hasNextPage": False},
-            }
-        },
-    ]
-    with patch.object(api, "graphql", side_effect=responses) as request:
-        nodes = api.connection(1, "reviewThreads", "isResolved")
-        assert sum((not n["isResolved"] for n in nodes)) == 1
-        assert request.call_args.args[2] == "second"
 
 
 def test_targeting_uses_pr_number_or_current_open_prs():
@@ -414,8 +323,6 @@ def test_graphql_state_query_omits_unused_cursor_variable():
     with patch.object(api, "request", return_value=response) as request:
         api.graphql(1, "number")
         assert "$cursor" not in request.call_args.args[1]["query"]
-        api.graphql(1, "reviewThreads(first: 100, after: $cursor) { nodes { isResolved } }")
-        assert "$cursor: String" in request.call_args.args[1]["query"]
 
 
 @pytest.mark.parametrize("state", ["CLEAN", "BLOCKED", "UNSTABLE", "BEHIND", "UNKNOWN"])
@@ -430,7 +337,7 @@ def test_ci_aggregate_changes_are_neither_requested_nor_recorded(state):
         return graphql(number, selection)
 
     api.graphql = read
-    result = assess(collect(api, 1), policy())
+    result = assess(collect(api, 1, policy=policy()), policy())
     assert result["decision"] == "SHADOW_CONDITIONS_MET"
     assert result["observations"]["stable"]
     assert result["observations"]["observation_changes"] == []
@@ -443,111 +350,72 @@ def test_ci_aggregate_changes_are_neither_requested_nor_recorded(state):
 @pytest.mark.parametrize(
     "drift",
     [
-        {"state": "CLOSED"},
-        {"isDraft": True},
-        {"mergeable": "CONFLICTING"},
-        {"mergeable": "UNKNOWN"},
-        {"isDraft": True, "updatedAt": "2026-09-11T12:01:00Z", "mergeable": "UNKNOWN"},
-    ],
-)
-def test_pr_state_drift_does_not_invalidate_review_observation(drift, monkeypatch):
-    monkeypatch.setattr("pr_merge_readiness.collect.time.sleep", lambda _: None)
-    api = FixtureAPI()
-    api.drift = drift
-    facts = collect(api, 1)
-    assert not facts["stable"]
-    assert facts["review_stable"]
-    assert facts["observation_changes"]
-    result = assess(facts, policy())
-    assert result["decision"] == "INSUFFICIENT_DATA"
-    assert result["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
-
-
-@pytest.mark.parametrize(
-    "drift",
-    [
         {"headRefOid": "d" * 40},
         {"baseRefOid": "d" * 40},
         {"baseRefName": "release"},
-        {"reviewDecision": "CHANGES_REQUESTED"},
         {"changedFiles": 2},
     ],
 )
 def test_review_target_drift_invalidates_label_assessment(drift):
     api = FixtureAPI()
     api.drift = {"isDraft": True, **drift}
-    facts = collect(api, 1)
-    assert not facts["review_stable"]
-    assert assess(facts, policy())["label_assessment"]["decision"] == "INSUFFICIENT_DATA"
+    facts = collect(api, 1, policy=policy())
+    assert not facts["stable"]
 
 
 @pytest.mark.parametrize(
-    "mergeable,expected",
-    [("MERGEABLE", "SHADOW_CONDITIONS_MET"), ("CONFLICTING", "HUMAN_REVIEW_REQUIRED")],
+    "field,value",
+    [
+        ("isDraft", True),
+        ("mergeable", "UNKNOWN"),
+        ("reviewDecision", "CHANGES_REQUESTED"),
+        ("state", "CLOSED"),
+    ],
 )
-def test_initial_unknown_waits_for_mergeability_before_observing(mergeable, expected):
+def test_github_merge_state_is_not_a_gate_or_wait_target(field, value):
     api = FixtureAPI()
-    api.state["mergeable"] = "UNKNOWN"
-    pending = deepcopy(api.state)
-    settled = {**pending, "mergeable": mergeable}
-    with (
-        patch.object(api, "graphql", side_effect=[pending, pending, settled, settled]),
-        patch("pr_merge_readiness.collect.time.sleep") as sleep,
-    ):
-        result = assess(collect(api, 1), policy())
-    assert sleep.call_count == 2
-    assert result["decision"] == expected
-    assert result["observations"]["pr"]["mergeable"] == mergeable
-    assert result["observations"]["stable"]
-    assert result["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
+    api.drift = {field: value}
+    original = api.graphql
 
+    def read(number, selection):
+        assert not {"isDraft", "mergeable", "reviewDecision"} & set(selection.split())
+        return original(number, selection)
 
-@pytest.mark.parametrize("head", [HEAD, "d" * 40])
-def test_final_unknown_rechecks_the_whole_pr_and_keeps_head_drift(head):
-    api = FixtureAPI()
-    before = deepcopy(api.state)
-    pending = {**before, "mergeable": "UNKNOWN"}
-    settled = {**before, "headRefOid": head}
-    with (
-        patch.object(api, "graphql", side_effect=[before, pending, settled]),
-        patch("pr_merge_readiness.collect.time.sleep") as sleep,
-    ):
-        result = assess(collect(api, 1), policy())
-    sleep.assert_called_once_with(MERGEABILITY_RETRY_SECONDS)
-    assert result["decision"] == ("SHADOW_CONDITIONS_MET" if head == HEAD else "INSUFFICIENT_DATA")
-    assert result["label_assessment"]["decision"] == result["decision"]
-
-
-def test_persistent_unknown_has_bounded_retries_and_never_becomes_ready():
-    api = FixtureAPI()
-    api.state["mergeable"] = "UNKNOWN"
-    with patch("pr_merge_readiness.collect.time.sleep") as sleep:
-        result = assess(collect(api, 1), policy())
-    assert api.reads == 2 * (1 + MERGEABILITY_RETRIES)
-    assert sleep.call_count == 2 * MERGEABILITY_RETRIES
-    assert result["decision"] == "WAITING"
-    assert result["observations"]["pr"]["mergeable"] == "UNKNOWN"
-    assert result["label_assessment"]["decision"] == "SHADOW_CONDITIONS_MET"
-
-
-@pytest.mark.parametrize("state", ["CLOSED", "MERGED"])
-def test_ended_pr_does_not_wait_for_mergeability(state):
-    api = FixtureAPI()
-    api.state.update(state=state, mergeable="UNKNOWN")
-    with patch("pr_merge_readiness.collect.time.sleep") as sleep:
-        result = assess(collect(api, 1), policy())
-    sleep.assert_not_called()
+    api.graphql = read
+    result = assess(collect(api, 1, policy=policy()), policy())
+    assert result["decision"] == "SHADOW_CONDITIONS_MET"
     assert api.reads == 2
-    assert result["decision"] == "HUMAN_REVIEW_REQUIRED"
+    assert "unresolved_threads" not in result["observations"]
+    assert not {"draft", "mergeable", "review_decision"} & result["observations"]["pr"].keys()
 
 
-def test_api_failure_during_mergeability_retry_remains_collection_failure():
+def test_recent_files_do_not_read_reviews_or_threads():
     api = FixtureAPI()
-    api.state["mergeable"] = "UNKNOWN"
-    with (
-        patch.object(api, "graphql", side_effect=[api.state, CollectionError("API 403")]),
-        patch("pr_merge_readiness.collect.time.sleep"),
-    ):
-        result = assess(collect(api, 1), policy())
-    assert result["decision"] == "INSUFFICIENT_DATA"
-    assert result["observations"]["collection_errors"] == ["API 403"]
+    pages = api.pages
+
+    def read(path, key=None):
+        assert not path.endswith("/reviews")
+        return pages(path, key)
+
+    api.pages = read
+    result = collect(api, 1, policy=policy())
+    assert result["reviews"] == []
+    assert assess(result, policy())["decision"] == "SHADOW_CONDITIONS_MET"
+
+
+def test_history_approval_is_rechecked_and_drift_requires_reobservation():
+    api = FixtureAPI()
+    pages = api.pages
+
+    def changed(path, key=None):
+        records = pages(path, key)
+        if path.endswith("/reviews") and api.paths.count(path) == 2:
+            records[0]["state"] = "DISMISSED"
+        return records
+
+    api.pages = changed
+    settings = {"stale_change_review_days": 1}
+    result = collect(api, 1, policy=settings)
+    assert not result["rechecked"]["reviews"]
+    assert result["observation_changes"][0]["field"] == "state"
+    assert assess(result, settings)["decision"] == "INSUFFICIENT_DATA"

@@ -38,14 +38,14 @@ def relative_path(value: str) -> str:
 
 def validate_config(value: dict[str, Any]) -> Config:
     keys(value, {"version", "review"})
-    if type(value["version"]) is not int or value["version"] != 3:
-        raise EvaluationError("config version 3 required; see docs/workflow.md for migration")
+    if type(value["version"]) is not int or value["version"] != 4:
+        raise EvaluationError("config version 4 required; see docs/workflow.md for migration")
     keys(
         value["review"],
-        {"minimum_approvals", "require_resolved_threads", "stale_change_review_days"},
+        {"stale_change_review_days"},
     )
     validate_policy(cast(Policy, value["review"]))
-    return cast(Config, {"version": 3, "review": value["review"]})
+    return cast(Config, {"version": 4, "review": value["review"]})
 
 
 def load_config(path: Path) -> Config:
@@ -55,8 +55,6 @@ def load_config(path: Path) -> Config:
 
 def policy_from(config: Config) -> Policy:
     return {
-        "minimum_approvals": config["review"]["minimum_approvals"],
-        "require_resolved_threads": config["review"]["require_resolved_threads"],
         "stale_change_review_days": config["review"]["stale_change_review_days"],
     }
 

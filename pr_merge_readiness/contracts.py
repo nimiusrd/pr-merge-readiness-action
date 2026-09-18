@@ -6,29 +6,24 @@ import re
 from datetime import datetime
 from typing import Any, Literal, NotRequired, TypedDict
 
-Decision = Literal["SHADOW_CONDITIONS_MET", "WAITING", "HUMAN_REVIEW_REQUIRED", "INSUFFICIENT_DATA"]
-ConditionStatus = Literal["pass", "waiting", "blocked", "unknown"]
+Decision = Literal["SHADOW_CONDITIONS_MET", "HUMAN_REVIEW_REQUIRED", "INSUFFICIENT_DATA"]
+ConditionStatus = Literal["pass", "blocked", "unknown"]
 
 
 class Policy(TypedDict):
-    minimum_approvals: int
-    require_resolved_threads: bool
     stale_change_review_days: int
 
 
 class Config(TypedDict):
-    version: Literal[3]
+    version: Literal[4]
     review: Policy
 
 
 class PullRequest(TypedDict):
     number: int
     state: Literal["OPEN", "CLOSED", "MERGED"]
-    draft: bool
     head_sha: str
     base_sha: str
-    mergeable: Literal["MERGEABLE", "CONFLICTING", "UNKNOWN"]
-    review_decision: str | None
     base_ref: NotRequired[str]
     updated_at: NotRequired[str]
     additions: NotRequired[int]
@@ -85,23 +80,19 @@ class ObservationChange(TypedDict):
 
 class DecisionMetadata(TypedDict):
     reviews: list[Review]
-    unresolved_threads: int
 
 
 class Observations(TypedDict):
-    schema_version: Literal[2]
+    schema_version: Literal[3]
     observed_at: str
     repository: str
     collection_errors: list[str]
     stable: bool
-    review_stable: bool
     pr: NotRequired[PullRequest]
     change: NotRequired[ChangeSize]
     files: NotRequired[list[ChangedFile]]
     change_history: NotRequired[ChangeHistory]
     reviews: NotRequired[list[Review]]
-    unresolved_threads: NotRequired[int]
-    ci_definition_changes: NotRequired[list[str]]
     rechecked: NotRequired[dict[str, bool]]
     observation_changes: NotRequired[list[ObservationChange] | None]
 
@@ -119,7 +110,6 @@ class ConditionAssessment(TypedDict):
 
 
 class Assessment(ConditionAssessment):
-    label_assessment: ConditionAssessment
     observations: Observations
     policy: Policy
 

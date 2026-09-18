@@ -1,4 +1,4 @@
-# uses をリリースタグが指す40桁 SHA に固定します。
+# version 4 対応版の公開後、リリースタグが指す40桁 SHA に置き換えます。
 name: PR Merge Readiness
 
 on:
@@ -28,4 +28,4 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@568c7441e16afa46db11bc84f1e4708e6525a404 # v0.6.0
+      - uses: nimiusrd/pr-merge-readiness-action@<RELEASE_COMMIT_SHA>

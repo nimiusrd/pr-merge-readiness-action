@@ -114,7 +114,7 @@ class MultiPRHistoryAPI(HistoryAPI):
 def observe(api):
     with patch("pr_merge_readiness.collect.datetime") as clock:
         clock.now.return_value = AT
-        return collect(api, 1)
+        return collect(api, 1, policy=policy())
 
 
 @pytest.mark.parametrize(
@@ -185,20 +185,6 @@ def test_new_head_and_dismissal_require_a_new_approval():
     assert assess(data, config())["decision"] == "SHADOW_CONDITIONS_MET"
     data["reviews"][1]["state"] = "DISMISSED"
     assert assess(data, config())["decision"] == "HUMAN_REVIEW_REQUIRED"
-
-
-def test_human_approval_does_not_override_other_conditions():
-    for mutation, expected in [
-        (lambda d: d.update(unresolved_threads=1), "HUMAN_REVIEW_REQUIRED"),
-        (lambda d: d.update(stable=False), "INSUFFICIENT_DATA"),
-    ]:
-        data = history_facts()
-        data["reviews"] = [approval()]
-        mutation(data)
-        assert assess(data, config())["decision"] == expected
-    data = history_facts()
-    data["reviews"] = [approval()]
-    assert assess(data, {**config(), "minimum_approvals": 2})["decision"] == "WAITING"
 
 
 def test_missing_or_inconsistent_history_never_passes_even_with_approval():
@@ -387,4 +373,39 @@ def test_base_changes_and_reviewer_identity_changes_invalidate_observation():
     data = observe(api)
     assert not data["rechecked"]["reviews"]
     assert data["observation_changes"][0]["field"] == "author_type"
+    assert assess(data, config())["decision"] == "INSUFFICIENT_DATA"
+
+
+def test_approval_does_not_override_incomplete_observation():
+    data = history_facts()
+    data.update(reviews=[approval()], stable=False)
+    assert assess(data, config())["decision"] == "INSUFFICIENT_DATA"
+
+
+def test_other_reviewers_change_request_is_left_to_rulesets():
+    data = history_facts()
+    data["reviews"] = [approval(), approval(id=2, author="other", state="CHANGES_REQUESTED")]
+    assert assess(data, config())["decision"] == "SHADOW_CONDITIONS_MET"
+
+
+def test_approval_revocation_uses_submission_time_and_ignores_comments():
+    data = history_facts()
+    data["reviews"] = [
+        approval(id=2),
+        approval(id=1, state="CHANGES_REQUESTED", submitted_at="2026-09-11T13:00:00Z"),
+    ]
+    assert assess(data, config())["decision"] == "HUMAN_REVIEW_REQUIRED"
+    data["reviews"][1]["state"] = "COMMENTED"
+    assert assess(data, config())["decision"] == "SHADOW_CONDITIONS_MET"
+
+
+def test_threshold_crossing_during_collection_requires_reobservation():
+    api = HistoryAPI()
+    # ちょうど30日は承認不要。観測の完了時に超過したら未取得の承認を推測しない。
+    api.commits[0]["commit"]["committer"]["date"] = (AT - timedelta(days=30)).isoformat()
+    with patch("pr_merge_readiness.collect.datetime") as clock:
+        clock.now.side_effect = [AT, AT, AT + timedelta(microseconds=1)]
+        data = collect(api, 1, policy=config())
+    assert not any(path.endswith("/reviews") for path in api.paths)
+    assert "threshold crossed" in data["collection_errors"][0]
     assert assess(data, config())["decision"] == "INSUFFICIENT_DATA"
