@@ -1,5 +1,7 @@
 # 運用と移行
 
+この文書は公開済み v0.6.0 と現在の実装の動作を説明します。今後の責務は[Action の責務](responsibilities.md)、GitHub 側で担保する条件は[推奨 Ruleset](rulesets.md)を参照してください。
+
 ## 実行対象
 
 | イベント | 処理 |
@@ -14,7 +16,7 @@
 
 同一リポジトリの通常 PR だけを自動処理します。fork・Dependabot・作成元リポジトリが削除された PR は自動処理を省略します。手動同期ではこれらも観測しますが、管理ラベルは除去します。
 
-レビュー・スレッド解決・base branch の更新後は Run workflow で再評価できます。競合中の PR は `pull_request` イベントが起動しません。[GitHub のイベント仕様](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)を参照してください。
+現行版では、レビュー・スレッド解決・base branch の更新後は Run workflow で再評価できます。方針上、一般のレビュー会話の解決は Ruleset の担当です。履歴に基づく独自条件に必要な人間の承認や、base の更新を反映するときは、この Action の再観測が必要です。競合中の PR は `pull_request` イベントが起動しません。[GitHub のイベント仕様](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)を参照してください。
 
 ## 設定と公開
 
