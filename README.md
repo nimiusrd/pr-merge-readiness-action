@@ -169,4 +169,4 @@ devcontainer exec --workspace-folder . uv run --locked python scripts/check_work
 
 ## ライセンス
 
-[MIT License](LICENSE) / [著作権と出典](NOTICE.md)
+[MIT License](LICENSE)
