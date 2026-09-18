@@ -33,7 +33,7 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 2. Actions の **Release → Run workflow** で main を選び、未使用の `vMAJOR.MINOR.PATCH` を入力します。タグ名は Action の配布版を識別します。Python パッケージを PyPI に公開する処理はありません。
 3. `build` job が source のテスト・静的検査、バイナリのビルド・テストを両 CPU で実行します。成功したバイナリと checksum を同じ run の artifact として保存します。
 4. `publish` job が main の先端とビルド対象のソース SHA の一致を確認し、同じ run の artifact だけを一時ディレクトリに取得します。checksum を検証し、`dist/` の2つのバイナリと checksum を置き換えます。変更があればソースコミットを親とする**配布用コミット**を作り、main の更新とそのコミットを指すタグの作成を atomic push で同時に公開してから、GitHub Release を作成します。バイナリと checksum が既存の内容と同じ場合は、現在の main コミットにタグを付けます。
-5. リリースノートの配布用コミット SHA を確認し、README・利用例・このリポジトリ自身の workflow の参照 SHA を更新します。設定 version が変わる場合は、[移行手順](workflow.md#version-3-から-version-4-への移行)に従って設定と workflow を同時に更新します。このソースの公開時は、本リポジトリの `.github/pr-merge-readiness.toml` も version 4 へ変更し、削除済みの2項目を除きます。例の `<RELEASE_COMMIT_SHA>` もこの時点で置き換えます。新しい設定だけを旧バイナリへ先行導入しないでください。
+5. リリースノートの配布用コミット SHA を確認し、README・利用例・このリポジトリ自身の workflow の参照 SHA を更新します。設定 version が変わる場合は、[移行手順](workflow.md#version-3-から-version-4-への移行)に従って設定と workflow を同時に更新します。新しい設定だけを旧バイナリへ先行導入しないでください。
 
 ソースコミットと配布用コミットはどちらも main の履歴に残ります。リリースノートにはビルド対象のソース SHA と公開した配布用 SHA を記載します。**Action にはリリースタグが指す40桁 SHA を指定してください。** リリース後の main にはソースだけを変更するコミットも入るため、任意の main の SHA では同梱バイナリとソースの対応を保証できません。`run.sh` はソースから動かす開発用 CLI として残します。
 
@@ -44,6 +44,8 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 [v0.5.1 の Release run](https://github.com/nimiusrd/pr-merge-readiness-action/actions/runs/35000713461)では、ソース `2fdf61530ceec44a788cd13b9a0c00ef22cbbe2a` のテスト・静的検査・両 CPU のバイナリ検証が成功し、配布用コミット `38abf77191ca0801d10dd6bd8c9d387bdad4b911` を main とタグに公開しました。Immutable Release として公開済みで、TOML の `action_ref` と Action SHA の一致制約を削除しています。
 
 [v0.6.0 の Release run](https://github.com/nimiusrd/pr-merge-readiness-action/actions/runs/35113264395)では、ソース `001c3be5f3c8e43009033331eaac03f6f15c5683` のテスト・静的検査・両 CPU のバイナリ検証が成功し、配布用コミット `568c7441e16afa46db11bc84f1e4708e6525a404` を公開しました。設定 version 3 と単一実行への簡素化、更新時刻だけの変化による観測失敗の修正を含みます。
+
+[v0.7.0 の Release run](https://github.com/nimiusrd/pr-merge-readiness-action/actions/runs/35344205607)では、ソース `55b6a9488b8928bd89d0279198b14c2322ca9dcf` のテスト・静的検査・両 CPU のバイナリ検証が成功し、配布用コミット `fc422aad51c2a719cc7b625afb5e3939b4f52868` を公開しました。設定 version 4 に対応し、GitHub Ruleset と重複する判定を削除しています。設定と参照 SHA を同時に移行してください。
 
 ビルド job の token は読み取り専用、公開 job だけが `contents: write` と `actions: read` を持ちます。main 以外、無効なバージョン、既存タグ、checkout SHA の不一致、未コミット変更、artifact 不足・checksum 不一致は公開前に拒否します。main がビルド対象 SHA から進んだ場合も停止します。確認後に main が進んだ場合やブランチ保護で push が拒否された場合は、通常の fast-forward 制約と atomic push により main とタグをどちらも公開せず終了します。最新 main で新しい run を実行してください。force push や保護設定の変更は行いません。[Git の atomic push](https://git-scm.com/docs/git-push#Documentation/git-push.txt---atomic)を使用します。
 

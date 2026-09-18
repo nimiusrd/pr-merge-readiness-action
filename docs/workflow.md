@@ -1,6 +1,6 @@
 # 運用と移行
 
-この文書は設定 version 4 に対応するソースの動作を説明します。公開済み v0.6.0 は version 3 を使用します。責務は[Action の責務](responsibilities.md)、GitHub 側で担保する条件は[推奨 Ruleset](rulesets.md)を参照してください。
+この文書は v0.7.0（設定 version 4）の動作を説明します。v0.6.0 は version 3 を使用します。責務は[Action の責務](responsibilities.md)、GitHub 側で担保する条件は[推奨 Ruleset](rulesets.md)を参照してください。
 
 ## 実行対象
 
@@ -32,16 +32,16 @@ PR のソースコードは checkout・実行しません。PR イベントの h
 
 ## version 3 から version 4 への移行
 
-このソースでは `minimum_approvals`・`require_resolved_threads` と、それに対応する判定を削除しました。version 3 や削除済みキーは受け付けません。公開済み v0.6.0 は version 4 に対応していないため、対応リリースの公開を待って移行します。
+v0.7.0 では `minimum_approvals`・`require_resolved_threads` と、それに対応する判定を削除しました。version 3 や削除済みキーは受け付けません。v0.6.0 は version 4 に対応していないため、設定と Action の参照先を同時に更新します。
 
 1. [推奨 Ruleset](rulesets.md)を参考に、必要な承認数・会話解決・CI・CODEOWNERS のルールを GitHub 側で管理します。
 2. TOML の `version` を `4` にし、`[review]` の `minimum_approvals` と `require_resolved_threads` を削除します。`stale_change_review_days` はそのまま使います。
-3. workflow の `uses:` を version 4 対応リリースが指す40桁 SHA に変更します。例の `<RELEASE_COMMIT_SHA>` は、この公開後に置き換えるプレースホルダーです。
+3. workflow の `uses:` を v0.7.0 の配布用 SHA `fc422aad51c2a719cc7b625afb5e3939b4f52868` に変更します。[利用例](../examples/pr-merge-readiness.yml)もこの SHA に固定しています。
 4. 設定と workflow を同じコミットで default branch に反映し、Run workflow でラベルを同期します。旧 `shadow/レビュー待ち` も除去されます。
 
 移行中は、旧 Action が提案された version 4 を拒否し、新 Action は default branch に残る version 3 を拒否します。両方の設定を受け付ける互換処理はありません。default branch に設定と参照先を揃えた後、手動実行で確認してください。マージ条件の変更や bypass を Action が行うことはありません。
 
-本リポジトリ自身の `.github/` は、対応版の公開まで v0.6.0・version 3 を維持します。ソース CI は version 4 の例・テストを検証し、運用中の設定は workflow に固定した配布版が検証します。ローカルでビルドした `dist/` の変更は実装 PR に含めません。公開と `.github/` の切り替えは[リリース手順](releases.md)に従います。
+本リポジトリ自身の `.github/` も v0.7.0・version 4 を使用します。ソース CI は version 4 の例・テストを検証し、運用中の設定は workflow に固定した配布版が検証します。ローカルでビルドした `dist/` の変更は実装 PR に含めません。公開と `.github/` の切り替えは[リリース手順](releases.md)に従います。
 
 ## version 2 からの移行
 
@@ -50,7 +50,7 @@ PR のソースコードは checkout・実行しません。PR イベントの h
 v0.6.0 は互換性のない簡素化を含みます。v0.5.1 は version 3 を扱えないため、設定と Action の参照先を同時に更新します。
 
 1. TOML の `version` を `3` にし、`[publication]` 全体と `action_ref` を削除します。`[review]` の3項目はそのまま使えます。
-2. workflow を[新しい例](../examples/pr-merge-readiness.yml)に合わせます。v0.6.0 の配布用 SHA は `568c7441e16afa46db11bc84f1e4708e6525a404` です。
+2. workflow を[v0.6.0 の例](https://github.com/nimiusrd/pr-merge-readiness-action/blob/568c7441e16afa46db11bc84f1e4708e6525a404/examples/pr-merge-readiness.yml)に合わせます。v0.6.0 の配布用 SHA は `568c7441e16afa46db11bc84f1e4708e6525a404` です。
 3. `checks: write` 権限と手動入力 `update-labels` を削除します。実行した対象のラベルは常に更新されます。旧版の `labels = "manual"`・`"off"` に相当する観測専用モードはありません。
 4. 個別 operation や artifact 受け渡しの job を使っていた場合は、1 job・1 step の呼び出しに置き換えます。
 5. 設定と workflow を同じコミットで default branch に反映し、Run workflow で PR 番号を空欄にしてラベルを同期します。
@@ -66,5 +66,3 @@ v0.6.0 は互換性のない簡素化を含みます。v0.5.1 は version 3 を�
 - 公開モードの設定と `update-labels` 入力
 
 手動実行の `pr-number` は workflow の入力として残ります。Action の入力とは異なります。過去の Check は履歴として残り、新版は更新しません。過去 artifact の再評価が必要な場合は、記録と一致する信頼済みの旧版を使用してください。
-
-このリポジトリ自身の `.github/` も v0.6.0 と version 3 を使用します。
