@@ -1,4 +1,4 @@
-"""レビュー条件だけを持つ設定version 3を検証する。"""
+"""レビュー条件だけを持つ設定version 4を検証する。"""
 
 import tomllib
 from pathlib import Path
@@ -19,14 +19,12 @@ def config():
     return validate_config(tomllib.loads(config_text()))
 
 
-@pytest.mark.parametrize("name,approvals,days", (("minimal", 0, 30), ("review-policy", 1, 14)))
-def test_examples_define_only_review_policy(name, approvals, days):
+@pytest.mark.parametrize("name,days", (("minimal", 30), ("review-policy", 14)))
+def test_examples_define_only_history_policy(name, days):
     value = validate_config(tomllib.loads(config_text(name)))
     assert set(value) == {"version", "review"}
-    assert value["version"] == 3
+    assert value["version"] == 4
     assert policy_from(value) == {
-        "minimum_approvals": approvals,
-        "require_resolved_threads": True,
         "stale_change_review_days": days,
     }
 
@@ -45,9 +43,9 @@ def test_removed_and_unknown_settings_are_rejected(key, value):
         validate_config({**config(), key: value})
 
 
-@pytest.mark.parametrize("version", [1, 2, 4, True, "3", None])
-def test_only_version_three_is_supported(version):
-    with pytest.raises(ValueError, match="version 3 required"):
+@pytest.mark.parametrize("version", [1, 2, 3, 5, True, "4", None])
+def test_only_version_four_is_supported(version):
+    with pytest.raises(ValueError, match="version 4 required"):
         validate_config({**config(), "version": version})
 
 
@@ -56,8 +54,6 @@ def test_only_version_three_is_supported(version):
     [
         (None, "version"),
         (None, "review"),
-        ("review", "minimum_approvals"),
-        ("review", "require_resolved_threads"),
         ("review", "stale_change_review_days"),
     ],
 )

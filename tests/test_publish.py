@@ -19,15 +19,14 @@ from pr_merge_readiness.publish import (
 )
 from tests.test_support import BASE, HEAD
 
-WAITING = DECISION_LABELS["WAITING"]
+REQUIRED = DECISION_LABELS["HUMAN_REVIEW_REQUIRED"]
 READY = DECISION_LABELS["SHADOW_CONDITIONS_MET"]
 UNKNOWN = DECISION_LABELS["INSUFFICIENT_DATA"]
 
 
-def report(decision="WAITING", number=1):
+def report(decision="HUMAN_REVIEW_REQUIRED", number=1):
     return {
         "decision": decision,
-        "label_assessment": {"decision": decision, "conditions": []},
         "observations": {
             "repository": "example/project",
             "pr": {
@@ -195,7 +194,7 @@ def test_same_repository_pr_is_labeled_even_when_repository_is_a_fork():
     api.pulls[1]["head"]["repo"]["fork"] = True
     api.pulls[1]["base"]["repo"]["fork"] = True
     assert publish_pr(api, 1, report()) == "updated"
-    assert api.names() == [WAITING]
+    assert api.names() == [REQUIRED]
 
 
 @pytest.mark.parametrize("decision", DECISION_LABELS)
@@ -218,7 +217,7 @@ def test_dependencies_label_does_not_exclude_other_authors(author):
     api = FixtureAPI(["dependencies"])
     api.pulls[1]["user"] = author
     assert publish_pr(api, 1, report()) == "updated"
-    assert api.names() == ["dependencies", WAITING]
+    assert api.names() == ["dependencies", REQUIRED]
 
 
 def test_failed_add_preserves_old_label_then_next_run_repairs():
@@ -229,7 +228,7 @@ def test_failed_add_preserves_old_label_then_next_run_repairs():
     assert api.names() == [READY]
     api.fail = None
     publish_pr(api, 1, report())
-    assert api.names() == [WAITING]
+    assert api.names() == [REQUIRED]
 
 
 def test_failed_delete_leaves_new_label_then_next_run_repairs():
@@ -237,15 +236,15 @@ def test_failed_delete_leaves_new_label_then_next_run_repairs():
     api.fail = lambda verb, path: verb == "DELETE"
     with pytest.raises(PublishError):
         publish_pr(api, 1, report())
-    assert sorted(api.names()) == sorted([READY, WAITING, "bug"])
+    assert sorted(api.names()) == sorted([READY, REQUIRED, "bug"])
     api.fail = None
     publish_pr(api, 1, report())
-    assert sorted(api.names()) == sorted([WAITING, "bug"])
+    assert sorted(api.names()) == sorted([REQUIRED, "bug"])
 
 
 def test_cleanup_deduplicates_closed_prs_and_ignores_issues_and_reopened_prs():
     api = FixtureAPI()
-    api.pulls = {1: pull([READY, "bug"], "closed"), 2: pull([WAITING])}
+    api.pulls = {1: pull([READY, "bug"], "closed"), 2: pull([REQUIRED])}
     api.closed = [
         {"number": 1, "pull_request": {}},
         {"number": 2, "pull_request": {}},
@@ -253,7 +252,7 @@ def test_cleanup_deduplicates_closed_prs_and_ignores_issues_and_reopened_prs():
     ]
     cleanup_closed(api)
     assert api.names(1) == ["bug"]
-    assert api.names(2) == [WAITING]
+    assert api.names(2) == [REQUIRED]
     assert sum(("/pulls/1" in path for _, path, _ in api.calls)) == 1
 
 
@@ -263,14 +262,14 @@ def test_definitions_created_once_then_reused():
     ensure_labels(api)
     assert api.definitions == set(DECISION_LABELS.values())
     ensure_labels(api)
-    assert sum((verb == "POST" for verb, _, _ in api.calls)) == 4
+    assert sum((verb == "POST" for verb, _, _ in api.calls)) == 3
 
 
 def test_http_delete_encodes_japanese_label_and_sends_no_body():
     with patch("pr_merge_readiness.publish.urlopen") as opened:
         opened.return_value.__enter__.return_value.read.return_value = b""
         api = GitHub("example/project")
-        path = f"{api.prefix}/issues/1/labels/{encoded_label(WAITING)}"
+        path = f"{api.prefix}/issues/1/labels/{encoded_label(REQUIRED)}"
         assert api.request(path, method="DELETE") is None
         req = opened.call_args.args[0]
         assert req.method == "DELETE"
@@ -282,7 +281,7 @@ def test_http_failure_is_not_success():
     error = HTTPError("https://example.com", 403, "Forbidden", {}, None)
     with patch("pr_merge_readiness.publish.urlopen", side_effect=error):
         with pytest.raises(PublishError, match="HTTP 403"):
-            GitHub("example/project").request("/repos/example/project/labels", {"name": WAITING})
+            GitHub("example/project").request("/repos/example/project/labels", {"name": REQUIRED})
 
 
 def test_closed_listing_reads_all_pages_and_rejects_truncation():
@@ -328,24 +327,17 @@ def test_server_normalized_color_does_not_cause_repeated_updates():
     assert all(verb == "GET" for verb, _, _ in api.calls)
 
 
-@pytest.mark.parametrize("decision", ["WAITING", "HUMAN_REVIEW_REQUIRED", "INSUFFICIENT_DATA"])
-def test_labels_use_review_assessment_even_when_reference_assessment_differs(decision):
-    api = FixtureAPI([UNKNOWN])
-    api.pulls[1]["draft"] = True
-    data = report("SHADOW_CONDITIONS_MET")
-    data["decision"] = decision
-    # 観測後のDraft・open/closed状態の変更は、レビュー対象が同じならラベルに影響しない。
-    data["observations"]["pr"].update(state="CLOSED", draft=False)
-    publish_pr(api, 1, data)
-    assert api.names() == [READY]
-
-
-@pytest.mark.parametrize("assessment", [None, {}, {"decision": []}, {"decision": "INVALID"}])
-def test_invalid_label_assessment_never_falls_back_to_overall_decision(assessment):
-    api = FixtureAPI([WAITING])
-    data = report("SHADOW_CONDITIONS_MET")
-    data["label_assessment"] = assessment
+@pytest.mark.parametrize("decision", [None, [], "INVALID", "WAITING"])
+def test_invalid_decision_does_not_publish(decision):
+    api = FixtureAPI([REQUIRED])
     with pytest.raises(PublishError):
-        publish_pr(api, 1, data)
+        publish_pr(api, 1, report(decision))
+    assert api.names() == [REQUIRED]
     assert all(verb == "GET" for verb, _, _ in api.calls)
-    assert api.names() == [WAITING]
+
+
+def test_retired_review_waiting_label_is_removed():
+    api = FixtureAPI(["shadow/レビュー待ち", "bug"])
+    publish_pr(api, 1, report("SHADOW_CONDITIONS_MET"))
+    assert sorted(api.names()) == sorted([READY, "bug"])
+    assert "shadow/レビュー待ち" not in DECISION_LABELS.values()

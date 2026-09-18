@@ -104,7 +104,7 @@ def test_all_open_sync_cleans_only_managed_labels_on_closed_prs(context, inputs)
     event.write_text(json.dumps({"inputs": inputs}))
     writer.pulls[2] = deepcopy(writer.pulls[1])
     writer.pulls[2].update(
-        state="closed", labels=[{"name": "bug"}, {"name": DECISION_LABELS["WAITING"]}]
+        state="closed", labels=[{"name": "bug"}, {"name": DECISION_LABELS["HUMAN_REVIEW_REQUIRED"]}]
     )
     writer.closed = [{"number": 2, "pull_request": {}}]
     assert main() == 0
@@ -125,16 +125,18 @@ def test_all_open_sync_cleans_only_managed_labels_on_closed_prs(context, inputs)
     ],
 )
 def test_pr_events_validate_proposal_but_use_default_policy(context, action):
-    _, writer, event, settings, root = context
+    reader, writer, event, settings, root = context
     os.environ["GITHUB_EVENT_NAME"] = "pull_request"
     data = pr_event(action)
     if action == "edited":
         data["changes"] = {"base": {}}
     if action == "closed":
-        writer.pulls[1].update(state="closed", labels=[{"name": DECISION_LABELS["WAITING"]}])
+        writer.pulls[1].update(
+            state="closed", labels=[{"name": DECISION_LABELS["HUMAN_REVIEW_REQUIRED"]}]
+        )
     event.write_text(json.dumps(data))
     settings["proposal"] = settings["proposal"].replace(
-        "minimum_approvals = 0", "minimum_approvals = 99"
+        "stale_change_review_days = 30", "stale_change_review_days = 1"
     )
     assert main() == 0
     assert writer.names() == (
@@ -144,6 +146,7 @@ def test_pr_events_validate_proposal_but_use_default_policy(context, action):
     assert settings["requests"].count("/repos/example/project/git/ref/heads/trunk") == 1
     assert all("state=closed" not in path for _, path, _ in writer.calls)
     assert BASE in (root / "summary").read_text()
+    assert not any(path.endswith("/reviews") for path in reader.paths)
 
 
 @pytest.mark.parametrize(
@@ -228,14 +231,14 @@ def test_additional_push_never_labels_an_unvalidated_head(context, monkeypatch, 
     reader, writer, event, _, root = context
     event.write_text(json.dumps(pr_event()))
     os.environ["GITHUB_EVENT_NAME"] = "pull_request"
-    writer.pulls[1]["labels"] = [{"name": DECISION_LABELS["WAITING"]}]
+    writer.pulls[1]["labels"] = [{"name": DECISION_LABELS["HUMAN_REVIEW_REQUIRED"]}]
     writer.pulls[1]["head"]["sha"] = "e" * 40
     if timing == "queued":
         reader.state["headRefOid"] = "e" * 40
     elif timing == "during":
         reader.drift = {"headRefOid": "e" * 40}
     assert main() == (0 if timing == "after" else 1)
-    assert writer.names() == [DECISION_LABELS["WAITING"]]
+    assert writer.names() == [DECISION_LABELS["HUMAN_REVIEW_REQUIRED"]]
     assert all(verb == "GET" for verb, _, _ in writer.calls)
     if timing != "after":
         assert "head" in (root / "summary").read_text()
@@ -267,7 +270,9 @@ def test_no_open_prs_still_cleans_closed_labels(context, monkeypatch):
     reader, writer, event, _, root = context
     event.write_text("{}")
     monkeypatch.setattr(reader, "pages", lambda *args: [])
-    writer.pulls[1].update(state="closed", labels=[{"name": DECISION_LABELS["WAITING"]}])
+    writer.pulls[1].update(
+        state="closed", labels=[{"name": DECISION_LABELS["HUMAN_REVIEW_REQUIRED"]}]
+    )
     writer.closed = [{"number": 1, "pull_request": {}}]
     assert main() == 0
     assert writer.names() == []

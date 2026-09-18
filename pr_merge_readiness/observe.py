@@ -20,7 +20,13 @@ def observe(
         (
             target,
             assess(
-                collect(api, target, history_collector=collector, expected_head=expected_head),
+                collect(
+                    api,
+                    target,
+                    policy=policy,
+                    history_collector=collector,
+                    expected_head=expected_head,
+                ),
                 policy,
             ),
         )

@@ -65,13 +65,13 @@ def invoke(binary, tmp_path, isolated, *args, env=None, code=0):
     return result
 
 
-@pytest.mark.parametrize("approvals", [0, 1, 99])
+@pytest.mark.parametrize("days", [1, 30, 99])
 def test_binary_validates_config_without_python_or_consumer_imports(
-    binary, tmp_path, isolated, approvals
+    binary, tmp_path, isolated, days
 ):
     configuration = tmp_path / "config with spaces.toml"
     configuration.write_text(
-        config_text().replace("minimum_approvals = 0", f"minimum_approvals = {approvals}")
+        config_text().replace("stale_change_review_days = 30", f"stale_change_review_days = {days}")
     )
     result = invoke(binary, tmp_path, isolated, "validate-config", "--config", str(configuration))
     assert json.loads(result.stdout) == {"valid": True}
@@ -187,16 +187,10 @@ def test_binary_observes_and_updates_labels_over_http(binary, tmp_path, isolated
             )
             assert self.headers["Authorization"] == "Bearer test-token"
             if path == "/graphql":
-                if "reviewThreads(" in body["query"]:
-                    pr = {
-                        "reviewThreads": {
-                            "totalCount": 1,
-                            "nodes": [{"isResolved": True}],
-                            "pageInfo": {"endCursor": None, "hasNextPage": False},
-                        }
-                    }
-                else:
-                    pr = reader.state
+                assert not {"reviewThreads", "reviewDecision", "mergeable", "isDraft"} & set(
+                    body["query"].replace("(", " ").split()
+                )
+                pr = reader.state
                 value = {"data": {"repository": {"pullRequest": pr}}}
             elif path == reader.prefix:
                 value = {"default_branch": "trunk"}
@@ -252,7 +246,7 @@ def test_binary_observes_and_updates_labels_over_http(binary, tmp_path, isolated
             assert writer.names() == [DECISION_LABELS["SHADOW_CONDITIONS_MET"]]
             assert "SHADOW_CONDITIONS_MET" in summary.read_text()
             assert sum("/contents/" in path for path in paths) == 1
-            assert not any("check-runs" in path for path in paths)
+            assert not any("check-runs" in path or "/reviews" in path for path in paths)
         finally:
             server.shutdown()
             thread.join()
