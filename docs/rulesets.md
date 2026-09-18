@@ -20,6 +20,72 @@
 
 この Action の `readiness` job は、追加確認が必要な場合でも処理自体は成功します。必須 CI として登録しても追加確認の完了を強制できないため、推奨する必須 Check に含めません。
 
+## インポート用 JSON
+
+[recommended-ruleset.json](../examples/recommended-ruleset.json) を保存して利用できます。以下も同じ内容です。実リポジトリの設定をエクスポートしたものではなく、個別の ID を含まない配布用のひな形です。
+
+初期値は承認1件・CODEOWNERS の承認・会話解決・必須 CI・削除と force push の制限です。CI 名を調整する前に適用しないよう `enforcement` は `disabled` にしています。取り込みと調整の後に `active` へ変更してください。
+
+```json
+{
+  "name": "推奨マージ条件",
+  "target": "branch",
+  "enforcement": "disabled",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": true,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {
+            "context": "REPLACE_WITH_YOUR_CI_CHECK_NAME"
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+取り込み時に次を調整します。
+
+| 項目 | 調整内容 |
+| --- | --- |
+| `required_status_checks` 内の `context` | `REPLACE_WITH_YOUR_CI_CHECK_NAME` を、利用先で実行される Check 名に置き換える。複数ある場合は要素を追加する。`readiness` は含めない |
+| `required_approving_review_count` | 独立したレビュアーがいる運用では1件以上。通常の承認を必須にしない運用では0にする |
+| `require_code_owner_review` | CODEOWNERS を用意する。所有者承認を必須にしない運用では `false` にする |
+| `enforcement` | 調整済みのルールを適用するときに `active` にする |
+| `conditions.ref_name` | default branch 以外も保護する場合に対象を調整する |
+
+CI の `integration_id` は特定の環境に固定しないため省略しています。必要なら取り込み先で CI の発行元アプリも指定します。bypass は空です。本リポジトリのように配布処理が main へ直接 push する場合は、後述のリリース方式との整合性も確認します。
+
+GitHub のリポジトリ設定から Rulesets を開き、New ruleset のメニューで Import a ruleset を選んで JSON を読み込み、内容を調整して作成します。[公式のインポート手順](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/managing-rulesets-for-a-repository#importing-a-ruleset)と[各フィールドの定義](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)を参照してください。
+
 ## CI 定義のレビュー
 
 CI 定義の変更に担当者の承認を求める場合は、CODEOWNERS で `/.github/workflows/` と `/.github/CODEOWNERS` を所有者に割り当て、Ruleset 側で所有者レビューを要求します。必要に応じて、workflow から呼び出すスクリプトや設定ファイルも対象にします。
