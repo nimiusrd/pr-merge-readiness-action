@@ -4,7 +4,7 @@ GitHub の標準ルールでは表現できない追加確認事項を、PR の�
 
 [Action の責務](docs/responsibilities.md)と[推奨 Ruleset](docs/rulesets.md)に役割分担を記載しています。承認数・未解決スレッド・CI の結果・特定パスの担当者レビューは GitHub に委ねます。
 
-このソースは設定 version 4 に対応しています。公開済み [v0.6.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.6.0) は version 3 用です。以下の利用例は version 4 対応版の公開後に、そのリリースの40桁 SHA を指定して使ってください。[移行手順](docs/workflow.md#version-3-から-version-4-への移行)を参照してください。
+[v0.7.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.7.0) は設定 version 4 に対応しています。以下の利用例は、このリリースの40桁 SHA に固定しています。v0.6.0（version 3）から更新する場合は、[移行手順](docs/workflow.md#version-3-から-version-4-への移行)に従って設定と workflow を同時に更新してください。
 
 ## 目次
 
@@ -41,7 +41,7 @@ GitHub の標準ルールでは表現できない追加確認事項を、PR の�
 3. default branch に反映します。以降は PR の更新時に実行され、Actions の **Run workflow** からも更新できます。
 
 ```yaml
-# version 4 対応版の公開後、リリースタグが指す40桁 SHA に置き換えます。
+# uses をリリースタグが指す40桁 SHA に固定します。
 name: PR Merge Readiness
 
 on:
@@ -71,7 +71,7 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@<RELEASE_COMMIT_SHA>
+      - uses: nimiusrd/pr-merge-readiness-action@fc422aad51c2a719cc7b625afb5e3939b4f52868 # v0.7.0
 ```
 
 手動実行の対象は次のとおりです。
