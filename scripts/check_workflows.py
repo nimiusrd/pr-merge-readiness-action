@@ -144,6 +144,22 @@ def main() -> None:
     assert release["jobs"]["publish"]["needs"] == "build"
     assert release["jobs"]["publish"]["permissions"] == {"actions": "read", "contents": "write"}
     assert release["jobs"]["publish"]["steps"][-1]["run"] == "bash scripts/publish_release.sh"
+    dispatcher = load(ROOT / ".github/workflows/release-on-merge.yml")
+    assert set(dispatcher["on"]) == {"push"}
+    assert dispatcher["on"]["push"] == {"branches": ["main"]}
+    assert dispatcher["permissions"] == {
+        "actions": "write",
+        "contents": "read",
+        "pull-requests": "read",
+    }
+    assert dispatcher["concurrency"] == {
+        "group": "release-on-merge",
+        "cancel-in-progress": "false",
+    }
+    dispatch_job = dispatcher["jobs"]["dispatch"]
+    assert dispatch_job["timeout-minutes"] == "60"
+    assert dispatch_job["steps"][-1]["run"] == "python3 scripts/dispatch_release.py"
+    assert dispatch_job["steps"][-1]["env"] == {"GH_TOKEN": "${{ github.token }}"}
     for job in (ci["jobs"]["binary"], release["jobs"]["build"]):
         assert job["strategy"]["matrix"]["include"] == [
             {"runner": "ubuntu-22.04", "platform": "linux-x64"},

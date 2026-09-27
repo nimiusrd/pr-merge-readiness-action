@@ -29,8 +29,8 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 
 ## 公開手順
 
-1. 実装 PR を main にマージし、CI のソース検証と両 CPU のバイナリ検証の成功を確認します。
-2. Actions の **Release → Run workflow** で main を選び、未使用の `vMAJOR.MINOR.PATCH` を入力します。タグ名は Action の配布版を識別します。Python パッケージを PyPI に公開する処理はありません。
+1. 実装 PR を main にマージします。マージは main への push になり、Release on merge が先端コミットを確認します。CI も同じ push でソース検証と両 CPU のバイナリ検証を実行します。Release workflow は公開前に同じ検証を独自に実行します。
+2. 先端コミットが main へマージ済みの PR に紐づき、既存のリリースタグを指していなければ、Release workflow を起動します。バージョンは既存タグの最大値の patch を 1 つ上げた値です。PR の `release:minor` または `release:major` ラベル、あるいは本文の `Release-As: minor` または `Release-As: major` がある場合は、その位を上げます。本文の `Release-Version: vMAJOR.MINOR.PATCH` は、未使用のそのバージョンを使います。`release:skip` ラベルがある PR は公開しません。配布用コミットにはリリースタグが付くため、同じコミットでは再公開しません。PR に紐づかない push も公開しません。タグ名は Action の配布版を識別します。Python パッケージを PyPI に公開する処理はありません。Actions の **Release → Run workflow** から、未使用のバージョンを指定して手動公開することもできます。実行中の Release がある場合は、その完了後に最新の main を確認します。
 3. `build` job が source のテスト・静的検査、バイナリのビルド・テストを両 CPU で実行します。成功したバイナリと checksum を同じ run の artifact として保存します。
 4. `publish` job が main の先端とビルド対象のソース SHA の一致を確認し、同じ run の artifact だけを一時ディレクトリに取得します。checksum を検証し、`dist/` の2つのバイナリと checksum を置き換えます。変更があればソースコミットを親とする**配布用コミット**を作り、main の更新とそのコミットを指すタグの作成を atomic push で同時に公開してから、GitHub Release を作成します。バイナリと checksum が既存の内容と同じ場合は、現在の main コミットにタグを付けます。
 5. リリースノートの配布用コミット SHA を確認し、README・利用例・このリポジトリ自身の workflow の参照 SHA を更新します。設定 version が変わる場合は、[移行手順](workflow.md#version-3-から-version-4-への移行)に従って設定と workflow を同時に更新します。新しい設定だけを旧バイナリへ先行導入しないでください。
@@ -49,7 +49,7 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-a
 
 ビルド job の token は読み取り専用、公開 job だけが `contents: write` と `actions: read` を持ちます。main 以外、無効なバージョン、既存タグ、checkout SHA の不一致、未コミット変更、artifact 不足・checksum 不一致は公開前に拒否します。main がビルド対象 SHA から進んだ場合も停止します。確認後に main が進んだ場合やブランチ保護で push が拒否された場合は、通常の fast-forward 制約と atomic push により main とタグをどちらも公開せず終了します。最新 main で新しい run を実行してください。force push や保護設定の変更は行いません。[Git の atomic push](https://git-scm.com/docs/git-push#Documentation/git-push.txt---atomic)を使用します。
 
-現在の main の保護設定は削除・force push の禁止です。Release workflow の `GITHUB_TOKEN` で main に通常の push を行います。この token による push は新たな CI を起動しないため、公開の根拠は同じ Release run 内で完了したソース・両 CPU のバイナリ検証です。[GitHub のイベント起動仕様](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)を参照してください。
+現在の main の保護設定は削除・force push の禁止です。Release workflow の `GITHUB_TOKEN` で main に通常の push を行います。この token による push は新たな CI と Release on merge を起動しないため、配布用コミットが次のリリースを連鎖させません。公開の根拠は同じ Release run 内で完了したソース・両 CPU のバイナリ検証です。[GitHub のイベント起動仕様](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)を参照してください。
 
 main・タグの公開後に GitHub Release の作成だけが失敗した場合、同じバージョンでの再実行は既存タグとして停止します。公開済み main を巻き戻さず、タグが指す配布用コミットと元の run の検証済み artifact を確認し、同じ配布物で Release 作成を完了してください。タグの移動や、別のソース・再ビルドしたバイナリによる同一バージョンの上書きは行いません。
 
