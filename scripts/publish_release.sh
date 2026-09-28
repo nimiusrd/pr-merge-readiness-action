@@ -39,7 +39,7 @@ cat > "$notes" <<EOF
 配布ブランチ: main
 検証 run: ${GITHUB_SERVER_URL:-https://github.com}/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
-Linux x64 用の Python 3.14 同梱バイナリです。arm64・Windows・macOS は対象外です。
+Ubuntu 26.04 以降の Linux x64 用の Python 3.14 同梱バイナリです。arm64・Windows・macOS は対象外です。
 利用側の uses を配布用コミット $release_sha に固定してください。
 設定 version 4 が必要です。docs/workflow.md に従って設定と workflow を同時に移行してください。
 実行時に uv・Python の導入やビルドは行いません。

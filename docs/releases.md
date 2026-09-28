@@ -10,9 +10,9 @@ Python 3.14 と uv 0.12.13 で開発し、`uv.lock` の PyInstaller 6.22.3 で P
 
 | runner の CPU | ビルド runner | Action 内の実行ファイル |
 | --- | --- | --- |
-| x64 | `ubuntu-22.04` | `dist/linux-x64/pr-merge-readiness` |
+| x64 | `ubuntu-26.04` | `dist/linux-x64/pr-merge-readiness` |
 
-Ubuntu 22.04 以降の Linux x64 のみを対象にします。arm64・Windows・macOS は対象外です。利用側の job で x64 の runner（例: `runs-on: ubuntu-latest`）を指定してください。Composite Action 自身は runner を指定できないため、起動スクリプトでも OS・CPU を確認します。Linux ではビルド環境の glibc より古い環境での動作を保証しません。[PyInstaller のプラットフォーム制約](https://pyinstaller.org/en/stable/usage.html#supporting-multiple-platforms)に従い、x64 の Ubuntu 22.04 runner でビルド・検証します。
+Ubuntu 26.04 以降の Linux x64 のみを対象にします。arm64・Windows・macOS は対象外です。利用側の job で x64 の runner（例: `runs-on: ubuntu-26.04`）を指定してください。Composite Action 自身は runner を指定できないため、起動スクリプトでも OS・CPU を確認します。Linux ではビルド環境の glibc より古い環境での動作を保証しません。[PyInstaller のプラットフォーム制約](https://pyinstaller.org/en/stable/usage.html#supporting-multiple-platforms)に従い、x64 の Ubuntu 26.04 runner でビルド・検証します。
 
 バイナリに `SHA256SUMS` を付け、Release asset として `pr-merge-readiness-linux-x64.tar.gz` を公開します。Action は asset を実行時にダウンロードせず、`uses:` で指定したコミット内の実行ファイルを使います。Action の実行に Git は不要です。
 
@@ -27,7 +27,7 @@ devcontainer exec --workspace-folder . --remote-env PMR_TEST_BINARY=dist/linux-x
   uv run --locked --group build pytest tests/test_binary.py
 ```
 
-ビルド用の依存は `build` group、作業用ファイルは Git 管理外の `build/`、バイナリの出力先は `dist/` です。Release workflow が配布用のバイナリと checksum を main で追跡します。`.gitignore` の `dist/` は、それ以外の未追跡の出力を除外するために残します。通常の `uv sync --locked` は開発・テスト用です。ビルド時は `--group build` を付けます。ローカル Dev Container のビルドはその Linux 環境向けの検証であり、配布物は Release workflow の Ubuntu 22.04 環境で作ります。ローカルで再ビルドすると追跡済みファイルにも差分が出るため、その差分を実装 PR に含めないでください。
+ビルド用の依存は `build` group、作業用ファイルは Git 管理外の `build/`、バイナリの出力先は `dist/` です。Release workflow が配布用のバイナリと checksum を main で追跡します。`.gitignore` の `dist/` は、それ以外の未追跡の出力を除外するために残します。通常の `uv sync --locked` は開発・テスト用です。ビルド時は `--group build` を付けます。ローカル Dev Container のビルドはその Linux 環境向けの検証であり、配布物は Release workflow の Ubuntu 26.04 環境で作ります。ローカルで再ビルドすると追跡済みファイルにも差分が出るため、その差分を実装 PR に含めないでください。
 
 Dev Container は `linux/amd64` に固定しています。Apple Silicon では Docker のエミュレーションを使用します。既存の arm64 コンテナは Rebuild Container で再作成してください。ビルドスクリプトは x64 以外での生成を拒否します。
 

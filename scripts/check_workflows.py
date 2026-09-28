@@ -41,7 +41,7 @@ def check_runtime(workflow: dict[str, Any], *, allow_placeholder: bool = False) 
     assert set(workflow["jobs"]) == {"readiness"}
     job = workflow["jobs"]["readiness"]
     assert not {"if", "needs", "outputs", "uses"} & job.keys()
-    assert job["runs-on"] == "ubuntu-latest"
+    assert job["runs-on"] == "ubuntu-26.04"
     assert job["timeout-minutes"] == "45"
     assert job["concurrency"] == {
         "group": "autonomous-merge-check-writer",
@@ -145,7 +145,7 @@ def main() -> None:
     assert release["jobs"]["publish"]["permissions"] == {"actions": "read", "contents": "write"}
     assert release["jobs"]["publish"]["steps"][-1]["run"] == "bash scripts/publish_release.sh"
     for job in (ci["jobs"]["binary"], release["jobs"]["build"]):
-        assert job["runs-on"] == "ubuntu-22.04"
+        assert job["runs-on"] == "ubuntu-26.04"
         assert "strategy" not in job
         commands = {step.get("run") for step in job["steps"]}
         assert {

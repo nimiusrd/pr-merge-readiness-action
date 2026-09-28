@@ -35,7 +35,7 @@ GitHub の標準ルールでは表現できない追加確認事項を、PR の�
 
 利用側の checkout、Python・uv のセットアップは不要です。
 
-runner は Linux x64 を使用してください。以下の `ubuntu-latest` は x64 です。次のリリースから配布バイナリを x64 のみに絞り、arm64 は対象外とします。
+runner は Linux x64 を使用してください。以下の `ubuntu-26.04` は x64 です。次のリリースから配布バイナリを x64 のみに絞り、arm64 は対象外とします。
 
 ## 導入
 
@@ -63,7 +63,7 @@ permissions: {}
 
 jobs:
   readiness:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     concurrency:
       group: autonomous-merge-check-writer
@@ -156,7 +156,7 @@ Action の版は `uses:` の40桁 SHA だけで指定します。実際の参照
 
 ## 開発
 
-Ubuntu 22.04 以降の Linux x64 に対応します。開発では Python 3.14・uv を使い、配布時は PyInstaller で Python を同梱します。Dev Container も `linux/amd64` に固定しており、Apple Silicon では Docker のエミュレーションを使用します。既存の arm64 コンテナを使用している場合は、Dev Containers の Rebuild Container で再作成してください。
+Ubuntu 26.04 以降の Linux x64 に対応します。開発では Python 3.14・uv を使い、配布時は PyInstaller で Python を同梱します。Dev Container も `linux/amd64` に固定しており、Apple Silicon では Docker のエミュレーションを使用します。既存の arm64 コンテナを使用している場合は、Dev Containers の Rebuild Container で再作成してください。
 
 ```sh
 devcontainer up --workspace-folder .
