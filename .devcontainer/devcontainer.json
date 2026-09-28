@@ -1,8 +1,10 @@
 {
   "name": "pr-merge-readiness-action",
   "build": {
-    "dockerfile": "Dockerfile"
+    "dockerfile": "Dockerfile",
+    "options": ["--platform=linux/amd64"]
   },
+  "runArgs": ["--platform=linux/amd64"],
   "remoteUser": "vscode",
   "customizations": {
     "vscode": {

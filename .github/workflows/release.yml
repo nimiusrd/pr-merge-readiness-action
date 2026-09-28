@@ -16,15 +16,7 @@ concurrency:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            platform: linux-x64
-          - runner: ubuntu-22.04-arm
-            platform: linux-arm64
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -55,11 +47,11 @@ jobs:
       - run: uv run --locked --group build python scripts/build_binary.py
       - run: uv run --locked --group build pytest tests/test_binary.py
         env:
-          PMR_TEST_BINARY: dist/${{ matrix.platform }}/pr-merge-readiness
+          PMR_TEST_BINARY: dist/linux-x64/pr-merge-readiness
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: binary-${{ matrix.platform }}
-          path: dist/${{ matrix.platform }}/
+          name: binary-linux-x64
+          path: dist/linux-x64/
           if-no-files-found: error
           retention-days: 7
   publish:

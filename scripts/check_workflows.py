@@ -145,10 +145,8 @@ def main() -> None:
     assert release["jobs"]["publish"]["permissions"] == {"actions": "read", "contents": "write"}
     assert release["jobs"]["publish"]["steps"][-1]["run"] == "bash scripts/publish_release.sh"
     for job in (ci["jobs"]["binary"], release["jobs"]["build"]):
-        assert job["strategy"]["matrix"]["include"] == [
-            {"runner": "ubuntu-22.04", "platform": "linux-x64"},
-            {"runner": "ubuntu-22.04-arm", "platform": "linux-arm64"},
-        ]
+        assert job["runs-on"] == "ubuntu-22.04"
+        assert "strategy" not in job
         commands = {step.get("run") for step in job["steps"]}
         assert {
             "uv sync --locked --group build",
@@ -160,10 +158,10 @@ def main() -> None:
             for step in job["steps"]
             if step.get("run", "").endswith("pytest tests/test_binary.py")
         )
-        assert (
-            binary_test["env"]["PMR_TEST_BINARY"]
-            == "dist/${{ matrix.platform }}/pr-merge-readiness"
-        )
+        assert binary_test["env"]["PMR_TEST_BINARY"] == "dist/linux-x64/pr-merge-readiness"
+    upload = release["jobs"]["build"]["steps"][-1]
+    assert upload["with"]["name"] == "binary-linux-x64"
+    assert upload["with"]["path"] == "dist/linux-x64/"
     for path in (ROOT / "examples").glob("*.toml"):
         validate_config(tomllib.loads(path.read_text()))
     print("Workflow and Action validation passed")

@@ -1,4 +1,4 @@
-"""uv.lock の PyInstaller で、現在の Linux architecture 用の配布物を生成する。"""
+"""uv.lock の PyInstaller で Linux x64 用の配布物を生成する。"""
 
 import hashlib
 import json
@@ -11,12 +11,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def main() -> None:
-    architectures = {"x86_64": "x64", "aarch64": "arm64", "arm64": "arm64"}
-    if platform.system() != "Linux" or platform.machine() not in architectures:
-        raise SystemExit("Build on Linux x64 or arm64 with Python 3.14")
+    if platform.system() != "Linux" or platform.machine() != "x86_64":
+        raise SystemExit("Build on Linux x64 with Python 3.14")
     if sys.version_info[:2] != (3, 14):
         raise SystemExit("Build with Python 3.14")
-    target = "linux-" + architectures[platform.machine()]
+    target = "linux-x64"
     destination = ROOT / "dist" / target
     subprocess.run(
         [
