@@ -24,6 +24,7 @@ def release(tmp_path):
         "GITHUB_REF": "refs/heads/main",
         "GITHUB_RUN_ID": "123",
         "GITHUB_REPOSITORY": "example/action",
+        "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
         "RELEASE_VERSION": "v1.2.3",
         "TEST_ARTIFACTS": str(tmp_path / "artifacts"),
@@ -136,7 +137,9 @@ def test_release_pins_verified_binaries_on_main(release, tmp_path):
     ]
     assert env["GITHUB_SHA"] in calls[-1]["notes"]
     assert commit in calls[-1]["notes"]
+    assert "リリース: v1.2.3" in calls[-1]["notes"]
     assert "配布ブランチ: main" in calls[-1]["notes"]
+    assert "検証 run: https://github.com/example/action/actions/runs/123" in calls[-1]["notes"]
     assert (tmp_path / "summary").read_text() == calls[-1]["notes"]
 
 
@@ -271,7 +274,7 @@ def test_next_release_handles_tracked_binaries_without_empty_commits(
     assert git("status", "--porcelain") == ""
 
 
-def test_release_creation_failure_preserves_published_main_and_tag(release):
+def test_release_creation_failure_preserves_published_main_and_tag(release, tmp_path):
     _, remote, env, git, publish = release
     env["TEST_RELEASE_FAILURE"] = "1"
     result = publish()
@@ -280,6 +283,11 @@ def test_release_creation_failure_preserves_published_main_and_tag(release):
     assert commit != env["GITHUB_SHA"]
     assert git("--git-dir=" + str(remote), "rev-parse", "refs/heads/main") == commit
     assert git("--git-dir=" + str(remote), "rev-parse", "refs/tags/v1.2.3") == commit
+    summary = (tmp_path / "summary").read_text()
+    assert env["GITHUB_SHA"] in summary
+    assert commit in summary
+    assert "リリース: v1.2.3" in summary
+    assert "https://github.com/example/action/actions/runs/123" in summary
     del env["TEST_RELEASE_FAILURE"]
     env["GITHUB_SHA"] = commit
     assert publish().returncode != 0  # 公開済みタグを再ビルドで置き換えない。

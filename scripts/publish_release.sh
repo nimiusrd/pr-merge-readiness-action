@@ -35,15 +35,20 @@ git push --atomic origin "$release_sha:refs/heads/main" "refs/tags/$RELEASE_VERS
 
 notes="$artifacts_dir/notes.md"
 cat > "$notes" <<EOF
+リリース: $RELEASE_VERSION
 ソースコミット: $GITHUB_SHA
 配布用コミット: $release_sha
 配布ブランチ: main
+検証 run: ${GITHUB_SERVER_URL:-https://github.com}/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
 Linux x64 / arm64 用の Python 3.14 同梱バイナリです。
 利用側の uses を配布用コミット $release_sha に固定してください。
 設定 version 4 が必要です。docs/workflow.md に従って設定と workflow を同時に移行してください。
 実行時に uv・Python の導入やビルドは行いません。
 EOF
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  cat "$notes" >> "$GITHUB_STEP_SUMMARY"
+fi
 for platform in linux-x64 linux-arm64; do
   tar -C "dist/$platform" -czf "dist/pr-merge-readiness-$platform.tar.gz" \
     pr-merge-readiness SHA256SUMS
@@ -51,6 +56,3 @@ done
 gh release create "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag \
   --title "$RELEASE_VERSION" --notes-file "$notes" \
   dist/pr-merge-readiness-linux-x64.tar.gz dist/pr-merge-readiness-linux-arm64.tar.gz
-if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  cat "$notes" >> "$GITHUB_STEP_SUMMARY"
-fi
