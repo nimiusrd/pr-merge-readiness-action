@@ -1,11 +1,7 @@
 name: Release
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: New release tag (vMAJOR.MINOR.PATCH)
-        required: true
-        type: string
+  push:
+    tags: ['v*']
 
 permissions:
   contents: read
@@ -15,59 +11,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Validate release request
         shell: bash
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          [[ "$GITHUB_REF" == refs/heads/main ]]
-          [[ "$RELEASE_VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          remote_tag="$(git ls-remote --tags origin "refs/tags/$RELEASE_VERSION")"
-          test -z "$remote_tag"
-          remote_main="$(git ls-remote --exit-code origin refs/heads/main)"
-          test "$remote_main" = "$GITHUB_SHA"$'\trefs/heads/main'
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: bash scripts/validate_release.sh
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: '0.12.13'
           python-version: '3.14'
           enable-cache: true
-      - run: uv sync --locked --group build
+      - run: uv sync --locked
       - run: uv run --locked pytest
       - run: uv run --locked ruff check .
       - run: uv run --locked ruff format --check .
       - run: uv run --locked mypy
       - run: uv run --locked python scripts/check_workflows.py
-      - run: uv run --locked --group build python scripts/build_binary.py
-      - run: uv run --locked --group build pytest tests/test_binary.py
+      - run: uv run --locked pytest tests/test_binary.py
         env:
           PMR_TEST_BINARY: dist/linux-x64/pr-merge-readiness
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: binary-linux-x64
-          path: dist/linux-x64/
-          if-no-files-found: error
-          retention-days: 7
   publish:
-    needs: build
+    needs: verify
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
-      actions: read
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Commit release binaries to main and publish tag
+          fetch-depth: 0
+      - name: Publish release from tagged binaries
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ github.ref_name }}
         run: bash scripts/publish_release.sh

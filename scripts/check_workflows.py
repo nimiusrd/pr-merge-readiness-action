@@ -127,7 +127,7 @@ def main() -> None:
             uv_setups += 1
             assert step["with"]["python-version"] == "3.14"
             assert "==" + step["with"]["version"] == project["tool"]["uv"]["required-version"]
-    assert uv_setups == 3  # ソースCI、バイナリCI、リリースビルド。利用側では導入しない。
+    assert uv_setups == 3  # ソースCI、バイナリCI、タグ内の検証。利用側では導入しない。
     ci = load(ROOT / ".github/workflows/ci.yml")
     commands = {step.get("run") for step in ci["jobs"]["test"]["steps"]}
     assert {
@@ -139,29 +139,59 @@ def main() -> None:
         "uv run --locked python scripts/check_workflows.py",
     } <= commands
     release = load(ROOT / ".github/workflows/release.yml")
-    assert set(release["on"]) == {"workflow_dispatch"}
+    assert release["on"] == {"push": {"tags": ["v*"]}}
     assert release["permissions"] == {"contents": "read"}
-    assert release["jobs"]["publish"]["needs"] == "build"
-    assert release["jobs"]["publish"]["permissions"] == {"actions": "read", "contents": "write"}
+    assert set(release["jobs"]) == {"verify", "publish"}
+    assert release["jobs"]["publish"]["needs"] == "verify"
+    assert release["jobs"]["publish"]["permissions"] == {"contents": "write"}
     assert release["jobs"]["publish"]["steps"][-1]["run"] == "bash scripts/publish_release.sh"
-    for job in (ci["jobs"]["binary"], release["jobs"]["build"]):
+    for job in release["jobs"].values():
+        assert job["steps"][0]["with"]["fetch-depth"] == "0"
+        assert not any("build_binary.py" in step.get("run", "") for step in job["steps"])
+        for step in job["steps"]:
+            if "RELEASE_VERSION" in step.get("env", {}):
+                assert step["env"]["RELEASE_VERSION"] == "${{ github.ref_name }}"
+    verify_commands = {step.get("run") for step in release["jobs"]["verify"]["steps"]}
+    assert (commands - {"uv python install --no-config 3.14"}) | {
+        "bash scripts/validate_release.sh"
+    } <= verify_commands
+    for job in (ci["jobs"]["binary"], release["jobs"]["verify"]):
         assert job["runs-on"] == "ubuntu-26.04"
         assert "strategy" not in job
         commands = {step.get("run") for step in job["steps"]}
-        assert {
-            "uv sync --locked --group build",
-            "uv run --locked --group build python scripts/build_binary.py",
-            "uv run --locked --group build pytest tests/test_binary.py",
-        } <= commands
+        if job is ci["jobs"]["binary"]:
+            assert {
+                "uv sync --locked --group build",
+                "uv run --locked --group build python scripts/build_binary.py",
+                "uv run --locked --group build pytest tests/test_binary.py",
+            } <= commands
+        else:
+            assert "uv run --locked pytest tests/test_binary.py" in commands
         binary_test = next(
             step
             for step in job["steps"]
             if step.get("run", "").endswith("pytest tests/test_binary.py")
         )
         assert binary_test["env"]["PMR_TEST_BINARY"] == "dist/linux-x64/pr-merge-readiness"
-    upload = release["jobs"]["build"]["steps"][-1]
+    upload = ci["jobs"]["binary"]["steps"][-1]
+    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
     assert upload["with"]["name"] == "binary-linux-x64"
     assert upload["with"]["path"] == "dist/linux-x64/"
+    binary_steps = ci["jobs"]["binary"]["steps"]
+    assert binary_steps[0]["with"]["fetch-depth"] == "0"
+    bundled_test = next(
+        step
+        for step in binary_steps
+        if step.get("name") == "Test changed distribution before rebuilding"
+    )
+    build_step = next(
+        step for step in binary_steps if "scripts/build_binary.py" in step.get("run", "")
+    )
+    assert binary_steps.index(bundled_test) < binary_steps.index(build_step)
+    assert bundled_test["env"]["PMR_BASE_SHA"] == (
+        "${{ github.event.pull_request.base.sha || github.event.before }}"
+    )
     for path in (ROOT / "examples").glob("*.toml"):
         validate_config(tomllib.loads(path.read_text()))
     print("Workflow and Action validation passed")
