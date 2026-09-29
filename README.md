@@ -6,21 +6,6 @@ GitHub の標準ルールでは表現できない追加確認事項を、PR の�
 
 [v0.7.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.7.0) は設定 version 4 に対応しています。以下の利用例は、このリリースの40桁 SHA に固定しています。v0.6.0（version 3）から更新する場合は、[移行手順](docs/workflow.md#version-3-から-version-4-への移行)に従って設定と workflow を同時に更新してください。
 
-## 目次
-
-- [概要](#概要)
-- [Action の責務](docs/responsibilities.md)
-- [推奨 Ruleset](docs/rulesets.md)
-- [導入](#導入)
-- [設定](#設定)
-- [判定内容](#判定内容)
-- [ラベル](#ラベル)
-- [実行の流れ](#実行の流れ)
-- [入力と出力](#入力と出力)
-- [開発](#開発)
-- [リリース手順](docs/releases.md)
-- [ライセンス](#ライセンス)
-
 ## 概要
 
 変更対象ファイルの履歴から、追加の人間レビューが必要かを判定します。コードの差分本文は評価せず、自動マージ・自動承認は行いません。
