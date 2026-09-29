@@ -31,13 +31,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: '0.12.13'
           python-version: '3.14'
           enable-cache: true
       - run: uv sync --locked --group build
+      - name: Test changed distribution before rebuilding
+        shell: bash
+        env:
+          PMR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          PMR_TEST_BINARY: dist/linux-x64/pr-merge-readiness
+        run: |
+          if git diff --quiet "$PMR_BASE_SHA" HEAD -- dist/; then
+            exit 0
+          fi
+          (cd dist/linux-x64 && sha256sum --check SHA256SUMS)
+          uv run --locked --group build pytest tests/test_binary.py
       - run: uv run --locked --group build python scripts/build_binary.py
       - run: uv run --locked --group build pytest tests/test_binary.py
         env:
           PMR_TEST_BINARY: dist/linux-x64/pr-merge-readiness
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: binary-linux-x64
+          path: dist/linux-x64/
+          if-no-files-found: error
+          retention-days: 7

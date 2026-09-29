@@ -1,11 +1,10 @@
-"""Git はローカル bare remote、GitHub は偽物を使い、公開内容と失敗時の境界を確認する。"""
+"""ローカル bare remote と偽の GitHub CLI で、タグの検証と公開の境界を確認する。"""
 
 import hashlib
 import json
 import os
 import subprocess
 import sys
-import tarfile
 
 import pytest
 
@@ -21,13 +20,12 @@ def release(tmp_path):
         **os.environ,
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
-        "GITHUB_REF": "refs/heads/main",
+        "GITHUB_REF": "refs/tags/v1.2.3",
         "GITHUB_RUN_ID": "123",
         "GITHUB_REPOSITORY": "example/action",
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
         "RELEASE_VERSION": "v1.2.3",
-        "TEST_ARTIFACTS": str(tmp_path / "artifacts"),
         "TEST_GH_LOG": str(tmp_path / "gh.jsonl"),
     }
 
@@ -43,43 +41,39 @@ def release(tmp_path):
     (source / "cli.py").write_text("# release source\n")
     git("add", ".")
     git("commit", "-qm", "Source")
-    env["GITHUB_SHA"] = git("rev-parse", "HEAD")
-    git("init", "--bare", "-q", str(remote))
-    git("remote", "add", "origin", str(remote))
-    git("push", "-q", "origin", "main")
-    artifact = tmp_path / "artifacts/binary-linux-x64"
+    artifact = source / "dist/linux-x64"
     artifact.mkdir(parents=True)
     contents = b"compiled fixture linux-x64"
-    (artifact / "pr-merge-readiness").write_bytes(contents)
+    binary = artifact / "pr-merge-readiness"
+    binary.write_bytes(contents)
+    binary.chmod(0o755)
     (artifact / "SHA256SUMS").write_text(
         hashlib.sha256(contents).hexdigest() + "  pr-merge-readiness\n"
     )
+    git("add", "-f", "dist")
+    git("commit", "-qm", "Prepare release")
+    env["GITHUB_SHA"] = git("rev-parse", "HEAD")
+    git("tag", "v1.2.3")
+    git("init", "--bare", "-q", str(remote))
+    git("remote", "add", "origin", str(remote))
+    git("push", "-q", "origin", "main", "v1.2.3")
     tools = tmp_path / "tools"
     tools.mkdir()
     gh = tools / "gh"
     gh.write_text(
         f"#!{sys.executable}\n"
-        "import json, os, pathlib, shutil, subprocess, sys\n"
+        "import json, os, pathlib, sys, tarfile\n"
         "args = sys.argv[1:]\n"
+        "assert args[:2] == ['release', 'create']\n"
         "record = {'args': args}\n"
-        "if args[:2] == ['run', 'download']:\n"
-        "    assert args[2] == os.environ['GITHUB_RUN_ID']\n"
-        "    name = args[args.index('--name') + 1]\n"
-        "    target = args[args.index('--dir') + 1]\n"
-        "    shutil.copytree(pathlib.Path(os.environ['TEST_ARTIFACTS']) / name, target)\n"
-        "elif args[:2] == ['release', 'create']:\n"
-        "    record['notes'] = pathlib.Path(args[args.index('--notes-file') + 1]).read_text()\n"
-        "else:\n"
-        "    assert args == ['auth', 'setup-git']\n"
-        "    if os.environ.get('TEST_ADVANCE_MAIN'):\n"
-        "        source = os.environ['GITHUB_SHA']\n"
-        "        commit = subprocess.check_output(['git', 'commit-tree', source + '^{tree}', "
-        "'-p', source, '-m', 'Concurrent main update'], text=True).strip()\n"
-        "        subprocess.run(['git', 'push', 'origin', commit + ':refs/heads/main'], check=True)\n"
-        "        record['advanced_main'] = commit\n"
+        "record['notes'] = pathlib.Path(args[args.index('--notes-file') + 1]).read_text()\n"
+        "with tarfile.open(args[-1]) as archive:\n"
+        "    record['members'] = [\n"
+        "        [m.name, m.mode, archive.extractfile(m).read().decode()]\n"
+        "        for m in archive.getmembers()]\n"
         "with open(os.environ['TEST_GH_LOG'], 'a') as log:\n"
         "    log.write(json.dumps(record) + '\\n')\n"
-        "if args[:2] == ['release', 'create'] and os.environ.get('TEST_RELEASE_FAILURE'):\n"
+        "if os.environ.get('TEST_RELEASE_FAILURE'):\n"
         "    sys.exit(1)\n"
     )
     gh.chmod(0o755)
@@ -98,44 +92,38 @@ def release(tmp_path):
     return source, remote, env, git, publish
 
 
-def test_release_pins_verified_binaries_on_main(release, tmp_path):
+@pytest.mark.parametrize("annotated", [False, True])
+@pytest.mark.parametrize("main_advanced", [False, True])
+def test_release_publishes_tagged_binary_without_changing_refs(
+    release, tmp_path, annotated, main_advanced
+):
     source, remote, env, git, publish = release
+    if annotated:
+        git("tag", "-fa", "v1.2.3", "-m", "Release")
+        git("push", "-q", "--force", "origin", "refs/tags/v1.2.3")
+    if main_advanced:
+        next_main = git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Next main")
+        git("push", "-q", "origin", next_main + ":refs/heads/main")
+    git("checkout", "--detach", env["GITHUB_SHA"])
+    refs = git("--git-dir=" + str(remote), "show-ref")
     result = publish()
     assert result.returncode == 0, result.stdout + result.stderr
-    commit = git("rev-parse", "v1.2.3")
-    assert git("rev-parse", commit + "^") == env["GITHUB_SHA"]
-    assert git("--git-dir=" + str(remote), "rev-parse", "refs/heads/main") == commit
-    assert git("--git-dir=" + str(remote), "rev-parse", "refs/tags/v1.2.3") == commit
-    assert git("--git-dir=" + str(remote), "for-each-ref", "--format=%(refname)", "refs/heads") == (
-        "refs/heads/main"
-    )
-    assert git("diff", "--name-only", env["GITHUB_SHA"], commit).splitlines() == [
-        "dist/linux-x64/SHA256SUMS",
-        "dist/linux-x64/pr-merge-readiness",
-    ]
-    assert git("ls-tree", commit, "dist/linux-x64/pr-merge-readiness").startswith("100755 ")
-    with tarfile.open(source / "dist/pr-merge-readiness-linux-x64.tar.gz") as archive:
-        assert archive.getnames() == ["pr-merge-readiness", "SHA256SUMS"]
-        member = archive.getmember("pr-merge-readiness")
-        assert member.mode == 0o755
-        assert archive.extractfile(member).read() == b"compiled fixture linux-x64"
+    assert git("--git-dir=" + str(remote), "show-ref") == refs
+    assert git("rev-parse", "HEAD") == env["GITHUB_SHA"]
+    assert git("status", "--porcelain") == ""
     calls = [json.loads(line) for line in (tmp_path / "gh.jsonl").read_text().splitlines()]
-    assert [call["args"][:2] for call in calls] == [
-        ["run", "download"],
-        ["auth", "setup-git"],
-        ["release", "create"],
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["args"][:3] == ["release", "create", "v1.2.3"]
+    assert "--verify-tag" in call["args"]
+    assert call["args"][-1].endswith("/pr-merge-readiness-linux-x64.tar.gz")
+    assert call["members"] == [
+        ["pr-merge-readiness", 0o755, "compiled fixture linux-x64"],
+        ["SHA256SUMS", 0o644, (source / "dist/linux-x64/SHA256SUMS").read_text()],
     ]
-    assert "--verify-tag" in calls[-1]["args"]
-    assert calls[-1]["args"][-1] == "dist/pr-merge-readiness-linux-x64.tar.gz"
-    assert list((source / "dist").glob("*.tar.gz")) == [
-        source / "dist/pr-merge-readiness-linux-x64.tar.gz"
-    ]
-    assert env["GITHUB_SHA"] in calls[-1]["notes"]
-    assert commit in calls[-1]["notes"]
-    assert "リリース: v1.2.3" in calls[-1]["notes"]
-    assert "配布ブランチ: main" in calls[-1]["notes"]
-    assert "検証 run: https://github.com/example/action/actions/runs/123" in calls[-1]["notes"]
-    assert (tmp_path / "summary").read_text() == calls[-1]["notes"]
+    assert "配布用コミット: " + env["GITHUB_SHA"] in call["notes"]
+    assert "検証 run: https://github.com/example/action/actions/runs/123" in call["notes"]
+    assert (tmp_path / "summary").read_text() == call["notes"]
 
 
 @pytest.mark.parametrize(
@@ -143,167 +131,81 @@ def test_release_pins_verified_binaries_on_main(release, tmp_path):
     [
         "version",
         "branch",
+        "tag-name",
         "head",
         "dirty",
-        "existing-tag",
-        "main-advanced",
+        "missing-tag",
+        "moved-tag",
+        "not-on-main",
         "remote",
         "checksum",
         "missing",
+        "arm64",
+        "mode",
+        "symlink",
     ],
 )
-def test_release_refuses_invalid_inputs_before_publishing(release, tmp_path, failure):
+def test_release_refuses_invalid_inputs_without_changing_refs(release, tmp_path, failure):
     source, remote, env, git, publish = release
-    original_main = env["GITHUB_SHA"]
     if failure == "version":
         env["RELEASE_VERSION"] = "v01.2.3"
+        env["GITHUB_REF"] = "refs/tags/v01.2.3"
     elif failure == "branch":
-        env["GITHUB_REF"] = "refs/heads/feature"
+        env["GITHUB_REF"] = "refs/heads/main"
+    elif failure == "tag-name":
+        env["GITHUB_REF"] = "refs/tags/v1.2.4"
     elif failure == "head":
         env["GITHUB_SHA"] = "0" * 40
     elif failure == "dirty":
         (source / "cli.py").write_text("modified\n")
-    elif failure == "existing-tag":
-        git("tag", "v1.2.3")
-        git("push", "-q", "origin", "v1.2.3")
-    elif failure == "main-advanced":
-        original_main = git(
-            "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Concurrent main update"
-        )
-        git("push", "-q", "origin", original_main + ":refs/heads/main")
+    elif failure == "missing-tag":
+        git("push", "origin", ":refs/tags/v1.2.3")
+    elif failure == "moved-tag":
+        git("push", "--force", "origin", "HEAD^:refs/tags/v1.2.3")
+    elif failure == "not-on-main":
+        git("push", "--force", "origin", "HEAD^:refs/heads/main")
     elif failure == "remote":
         git("remote", "set-url", "origin", str(tmp_path / "missing.git"))
-    elif failure == "checksum":
-        (tmp_path / "artifacts/binary-linux-x64/pr-merge-readiness").write_text("corrupted")
-    elif failure == "missing":
-        (tmp_path / "artifacts/binary-linux-x64/pr-merge-readiness").unlink()
+    else:
+        binary = source / "dist/linux-x64/pr-merge-readiness"
+        if failure == "checksum":
+            binary.write_text("corrupted")
+        elif failure == "missing":
+            binary.unlink()
+        elif failure == "arm64":
+            previous = source / "dist/linux-arm64"
+            previous.mkdir()
+            (previous / "pr-merge-readiness").write_bytes(b"previous binary")
+        elif failure == "mode":
+            binary.chmod(0o644)
+        elif failure == "symlink":
+            binary.unlink()
+            binary.symlink_to("../../cli.py")
+        git("add", "-f", "dist")
+        git("commit", "-qm", "Invalid distribution")
+        git("tag", "-f", "v1.2.3")
+        git("push", "--force", "origin", "main", "refs/tags/v1.2.3")
+        env["GITHUB_SHA"] = git("rev-parse", "HEAD")
+    refs = git("--git-dir=" + str(remote), "show-ref")
     original = git("rev-parse", "HEAD")
     result = publish()
     assert result.returncode != 0
     assert git("rev-parse", "HEAD") == original
-    assert git("--git-dir=" + str(remote), "rev-parse", "refs/heads/main") == original_main
-    tags = git("--git-dir=" + str(remote), "tag", "--list")
-    assert tags == ("v1.2.3" if failure == "existing-tag" else "")
-    branches = git("--git-dir=" + str(remote), "for-each-ref", "--format=%(refname)", "refs/heads")
-    assert branches.splitlines() == ["refs/heads/main"]
-    log = tmp_path / "gh.jsonl"
-    if log.exists():
-        assert all(
-            json.loads(line)["args"][:2] == ["run", "download"]
-            for line in log.read_text().splitlines()
-        )
+    assert git("--git-dir=" + str(remote), "show-ref") == refs
+    assert not (tmp_path / "gh.jsonl").exists()
+    assert not (tmp_path / "summary").exists()
 
 
-@pytest.mark.parametrize("rejected_ref", ["refs/heads/main", "refs/tags/v1.2.3"])
-def test_release_pushes_main_and_tag_atomically(release, tmp_path, rejected_ref):
+def test_release_creation_failure_preserves_refs_and_can_retry(release, tmp_path):
     _, remote, env, git, publish = release
-    hook = remote / "hooks/update"
-    hook.write_text(f'#!/bin/sh\n[ "$1" != "{rejected_ref}" ]\n')
-    hook.chmod(0o755)
-    result = publish()
-    assert result.returncode != 0
-    assert "atomic" in result.stderr
-    assert git("--git-dir=" + str(remote), "show-ref").splitlines() == [
-        env["GITHUB_SHA"] + " refs/heads/main"
-    ]
-    calls = [
-        json.loads(line)["args"][:2] for line in (tmp_path / "gh.jsonl").read_text().splitlines()
-    ]
-    assert calls == [["run", "download"], ["auth", "setup-git"]]
-
-
-def test_release_preserves_main_and_publishes_no_tag_if_main_advances_during_publish(
-    release, tmp_path
-):
-    _, remote, env, git, publish = release
-    env["TEST_ADVANCE_MAIN"] = "1"
-    result = publish()
-    assert result.returncode != 0
-    calls = [json.loads(line) for line in (tmp_path / "gh.jsonl").read_text().splitlines()]
-    advanced_main = calls[-1]["advanced_main"]
-    assert advanced_main != env["GITHUB_SHA"]
-    assert git("--git-dir=" + str(remote), "show-ref").splitlines() == [
-        advanced_main + " refs/heads/main"
-    ]
-    assert [call["args"][:2] for call in calls] == [
-        ["run", "download"],
-        ["auth", "setup-git"],
-    ]
-
-
-@pytest.mark.parametrize("changed_binary", [False, True])
-def test_next_release_handles_tracked_binaries_without_empty_commits(
-    release, tmp_path, changed_binary
-):
-    source, remote, env, git, publish = release
-    first_result = publish()
-    assert first_result.returncode == 0, first_result.stdout + first_result.stderr
-    first_commit = git("rev-parse", "HEAD")
-    env["GITHUB_SHA"] = first_commit
-    env["RELEASE_VERSION"] = "v1.2.4"
-    if changed_binary:
-        artifact = tmp_path / "artifacts/binary-linux-x64"
-        contents = b"next compiled fixture linux-x64"
-        (artifact / "pr-merge-readiness").write_bytes(contents)
-        (artifact / "SHA256SUMS").write_text(
-            hashlib.sha256(contents).hexdigest() + "  pr-merge-readiness\n"
-        )
-    result = publish()
-    assert result.returncode == 0, result.stdout + result.stderr
-    commit = git("rev-parse", "HEAD")
-    if changed_binary:
-        assert commit != first_commit
-        assert git("rev-parse", commit + "^") == first_commit
-    else:
-        assert commit == first_commit
-    assert git("--git-dir=" + str(remote), "rev-parse", "refs/heads/main") == commit
-    assert git("--git-dir=" + str(remote), "rev-parse", "refs/tags/v1.2.4") == commit
-    assert git("--git-dir=" + str(remote), "rev-parse", "refs/tags/v1.2.3") == first_commit
-    assert (source / "dist/linux-x64/pr-merge-readiness").read_bytes() == (
-        tmp_path / "artifacts/binary-linux-x64/pr-merge-readiness"
-    ).read_bytes()
-    assert git("status", "--porcelain") == ""
-
-
-def test_release_removes_tracked_arm64_binary_only_from_new_release(release):
-    source, remote, env, git, publish = release
-    previous = source / "dist/linux-arm64"
-    previous.mkdir(parents=True)
-    (previous / "pr-merge-readiness").write_bytes(b"previous arm64 binary")
-    (previous / "SHA256SUMS").write_text("previous checksum\n")
-    git("add", "-f", "dist/linux-arm64")
-    git("commit", "-qm", "Previous arm64 release")
-    previous_sha = git("rev-parse", "HEAD")
-    git("tag", "v1.2.2")
-    git("push", "-q", "origin", "main", "v1.2.2")
-    env["GITHUB_SHA"] = previous_sha
-
-    result = publish()
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert git("ls-tree", "v1.2.3", "dist/linux-arm64") == ""
-    assert git("ls-tree", "v1.2.3", "dist/linux-x64")
-    assert not previous.exists()
-    assert git("--git-dir=" + str(remote), "rev-parse", "v1.2.2") == previous_sha
-    assert git("show", "v1.2.2:dist/linux-arm64/pr-merge-readiness") == "previous arm64 binary"
-
-
-def test_release_creation_failure_preserves_published_main_and_tag(release, tmp_path):
-    _, remote, env, git, publish = release
+    refs = git("--git-dir=" + str(remote), "show-ref")
     env["TEST_RELEASE_FAILURE"] = "1"
-    result = publish()
-    assert result.returncode != 0
-    commit = git("rev-parse", "HEAD")
-    assert commit != env["GITHUB_SHA"]
-    assert git("--git-dir=" + str(remote), "rev-parse", "refs/heads/main") == commit
-    assert git("--git-dir=" + str(remote), "rev-parse", "refs/tags/v1.2.3") == commit
-    summary = (tmp_path / "summary").read_text()
-    assert env["GITHUB_SHA"] in summary
-    assert commit in summary
-    assert "リリース: v1.2.3" in summary
-    assert "https://github.com/example/action/actions/runs/123" in summary
+    assert publish().returncode != 0
+    assert git("--git-dir=" + str(remote), "show-ref") == refs
+    assert not (tmp_path / "summary").exists()
     del env["TEST_RELEASE_FAILURE"]
-    env["GITHUB_SHA"] = commit
-    assert publish().returncode != 0  # 公開済みタグを再ビルドで置き換えない。
-    assert git("rev-parse", "HEAD") == commit
-    assert git("--git-dir=" + str(remote), "rev-parse", "refs/heads/main") == commit
-    assert git("--git-dir=" + str(remote), "rev-parse", "refs/tags/v1.2.3") == commit
+    result = publish()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert git("--git-dir=" + str(remote), "show-ref") == refs
+    calls = [json.loads(line) for line in (tmp_path / "gh.jsonl").read_text().splitlines()]
+    assert calls[0]["members"] == calls[1]["members"]
