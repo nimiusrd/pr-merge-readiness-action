@@ -1,0 +1,37 @@
+{
+  "name": "pr-merge-readiness-action",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "PR の変更履歴に基づく追加確認を観測する GitHub Action",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "test": "node --import tsx --test tests/*.test.ts",
+    "lint": "eslint .",
+    "format": "prettier --write src tests scripts/*.ts *.json *.mjs .devcontainer/*.json",
+    "format:check": "prettier --check src tests scripts/*.ts *.json *.mjs .devcontainer/*.json",
+    "typecheck": "tsc --noEmit",
+    "check:workflows": "tsx scripts/check-workflows.ts",
+    "build": "tsx scripts/build.ts",
+    "test:bundle": "PMR_TEST_BUNDLE=build/dist/index.js node --import tsx --test tests/bundle.test.ts",
+    "validate-config": "tsx src/cli.ts validate-config",
+    "check:dist": "tsx scripts/check-dist.ts"
+  },
+  "dependencies": {
+    "smol-toml": "1.9.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.0",
+    "esbuild": "0.28.2",
+    "eslint": "10.11.0",
+    "prettier": "3.9.9",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.0",
+    "yaml": "2.9.1"
+  }
+}

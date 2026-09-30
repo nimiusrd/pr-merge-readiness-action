@@ -12,51 +12,42 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          version: '0.12.13'
-          python-version: '3.14'
-          enable-cache: true
-      - run: uv python install --no-config 3.14
-      - run: uv sync --locked
-      - run: uv run --locked pytest
-      - run: uv run --locked ruff check .
-      - run: uv run --locked ruff format --check .
-      - run: uv run --locked mypy
-      - run: uv run --locked python scripts/check_workflows.py
-  binary:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run check:workflows
+  bundle:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          version: '0.12.13'
-          python-version: '3.14'
-          enable-cache: true
-      - run: uv sync --locked --group build
-      - name: Test changed distribution before rebuilding
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Test committed distribution before building
         shell: bash
-        env:
-          PMR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          PMR_TEST_BINARY: dist/linux-x64/pr-merge-readiness
         run: |
-          if git diff --quiet "$PMR_BASE_SHA" HEAD -- dist/; then
-            exit 0
+          if [[ -d dist ]]; then
+            npm run check:dist
+            PMR_TEST_BUNDLE=dist/index.js node --import tsx --test tests/bundle.test.ts
           fi
-          (cd dist/linux-x64 && sha256sum --check SHA256SUMS)
-          uv run --locked --group build pytest tests/test_binary.py
-      - run: uv run --locked --group build python scripts/build_binary.py
-      - run: uv run --locked --group build pytest tests/test_binary.py
-        env:
-          PMR_TEST_BINARY: dist/linux-x64/pr-merge-readiness
+      - run: npm run build
+      - run: npm run check:dist -- build/dist
+      - run: npm run test:bundle
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
-          name: binary-linux-x64
-          path: dist/linux-x64/
+          name: action-bundle
+          path: build/dist/
           if-no-files-found: error
           retention-days: 7

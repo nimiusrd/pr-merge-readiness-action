@@ -11,19 +11,8 @@ inputs:
 outputs:
   operation:
     description: イベントから選択した処理（observe、validate-config、skip）
-    value: ${{ steps.run.outputs.operation }}
   config-sha:
     description: 使用した設定コミット
-    value: ${{ steps.run.outputs.config-sha }}
 runs:
-  using: composite
-  steps:
-    - id: run
-      shell: bash
-      env:
-        PMR_ROOT: ${{ github.action_path }}
-        PMR_SOURCE_REF: ${{ github.action_ref }}
-        PMR_SOURCE_REPOSITORY: ${{ github.action_repository }}
-        PMR_CONFIG_PATH: ${{ inputs.config-path }}
-        GH_TOKEN: ${{ inputs.token }}
-      run: bash "$PMR_ROOT/run-binary.sh" action
+  using: node24
+  main: dist/index.js
