@@ -18,9 +18,11 @@ GitHub の標準ルールでは表現できない追加確認事項を、PR の�
 | CI の結果 | GitHub Checks で確認する |
 | その他のラベル | 変更しない |
 
-利用側の checkout、Python・uv のセットアップは不要です。
+利用側の checkout、Node.js のセットアップ、依存インストールは不要です。Action は同梱された JavaScript バンドルを runner の Node.js 24 で実行します。
 
-runner は Linux x64 を使用してください。以下の `ubuntu-26.04` は x64 です。次のリリースから配布バイナリを x64 のみに絞り、arm64 は対象外とします。
+以下の導入例は `ubuntu-26.04` を使います。TypeScript 版では OS・CPU ごとの配布バイナリを使用しません。実行環境には Node.js 24 対応の GitHub Actions runner が必要です。
+
+この checkout は TypeScript 版の開発ソースです。以下の固定 SHA は公開済みの Python 版 v0.7.0 を指します。TypeScript 版の配布準備・公開後に、導入例と運用 workflow の参照を更新してください。
 
 ## 導入
 
@@ -141,19 +143,22 @@ Action の版は `uses:` の40桁 SHA だけで指定します。実際の参照
 
 ## 開発
 
-Ubuntu 26.04 以降の Linux x64 に対応します。開発では Python 3.14・uv を使い、配布時は PyInstaller で Python を同梱します。Dev Container も `linux/amd64` に固定しており、Apple Silicon では Docker のエミュレーションを使用します。既存の arm64 コンテナを使用している場合は、Dev Containers の Rebuild Container で再作成してください。
+開発環境は Node.js 24 と npm です。`.node-version`・`package.json`・`package-lock.json` を正本にします。既存の Python 用 Dev Container は Rebuild Container で再作成してください。CPU の固定はありません。
 
 ```sh
 devcontainer up --workspace-folder .
-devcontainer exec --workspace-folder . uv sync --locked
-devcontainer exec --workspace-folder . uv run --locked pytest
-devcontainer exec --workspace-folder . uv run --locked ruff check .
-devcontainer exec --workspace-folder . uv run --locked ruff format --check .
-devcontainer exec --workspace-folder . uv run --locked mypy
-devcontainer exec --workspace-folder . uv run --locked python scripts/check_workflows.py
+devcontainer exec --workspace-folder . npm ci
+devcontainer exec --workspace-folder . npm test
+devcontainer exec --workspace-folder . npm run lint
+devcontainer exec --workspace-folder . npm run format:check
+devcontainer exec --workspace-folder . npm run typecheck
+devcontainer exec --workspace-folder . npm run check:workflows
+devcontainer exec --workspace-folder . npm run build
+devcontainer exec --workspace-folder . npm run check:dist -- build/dist
+devcontainer exec --workspace-folder . npm run test:bundle
 ```
 
-ローカル設定の検証は `bash run.sh validate-config --config <path>`、配布バイナリの検証・公開は[リリース手順](docs/releases.md)を参照してください。
+ローカル設定の検証は `npm run validate-config -- --config <path>` を使います。開発用バンドルは `build/dist/` に生成し、追跡済み `dist/` は上書きしません。配布物の検証・公開は[リリース手順](docs/releases.md)を参照してください。
 
 ## ライセンス
 

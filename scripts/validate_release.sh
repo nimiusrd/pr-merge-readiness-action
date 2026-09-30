@@ -17,11 +17,12 @@ test "$remote_sha" = "$release_sha"
 git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
 git merge-base --is-ancestor "$release_sha" refs/remotes/origin/main
 
-# 古い CPU の配布物や余分なファイル、symlink、実行権限の欠落を拒否する。
-test "$(git ls-tree -r --name-only HEAD dist/)" = $'dist/linux-x64/SHA256SUMS\ndist/linux-x64/pr-merge-readiness'
-[[ "$(git ls-tree HEAD dist/linux-x64/pr-merge-readiness)" == '100755 blob '* ]]
-[[ "$(git ls-tree HEAD dist/linux-x64/SHA256SUMS)" == '100644 blob '* ]]
+# 配布物はバンドル済み JS・依存ライセンス・checksum だけ。symlink は拒否する。
+test "$(git ls-tree -r --name-only HEAD dist/)" = $'dist/SHA256SUMS\ndist/THIRD_PARTY_LICENSES.txt\ndist/cli.js\ndist/index.js\ndist/package.json'
+for file in SHA256SUMS THIRD_PARTY_LICENSES.txt cli.js index.js package.json; do
+  [[ "$(git ls-tree HEAD "dist/$file")" == '100644 blob '* ]]
+done
 (
-  cd dist/linux-x64
-  test "$(cat SHA256SUMS)" = "$(sha256sum pr-merge-readiness)"
+  cd dist
+  test "$(cat SHA256SUMS)" = "$(sha256sum THIRD_PARTY_LICENSES.txt cli.js index.js package.json)"
 )
