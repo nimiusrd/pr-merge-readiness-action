@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,6 +14,7 @@ import { DECISION_LABELS } from "../src/publish.js";
 import { object } from "../src/contracts.js";
 import {
   ACTION_SHA,
+  AT,
   HEAD,
   OLD,
   FixtureReader,
@@ -21,6 +22,11 @@ import {
   prEvent,
   pull,
 } from "./support.js";
+// 履歴・承認の fixture と時計を揃え、実行日でレビュー要否が変わらないようにする。
+beforeEach((t) => {
+  assert.ok("mock" in t);
+  t.mock.timers.enable({ apis: ["Date"], now: new Date(AT) });
+});
 async function context() {
   const root = await mkdtemp(join(tmpdir(), "pmr-runtime-"));
   const reader = new FixtureReader(),
