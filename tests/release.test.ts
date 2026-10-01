@@ -191,16 +191,32 @@ test("公開スクリプトはタグ内の3ファイルだけを梱包し remote
       { mode: 0o755 },
     );
     const refs = (await c.git("ls-remote", "origin")).stdout;
+    const summary = join(c.root, "summary.md");
+    const sha = c.env.GITHUB_SHA;
     await exec("bash", ["scripts/publish_release.sh"], {
       cwd: c.repo,
       env: {
         ...c.env,
         PATH: stub + ":" + process.env.PATH,
         GITHUB_REPOSITORY: "example/project",
+        GITHUB_SERVER_URL: "https://github.com",
         GITHUB_RUN_ID: "1",
+        GITHUB_STEP_SUMMARY: summary,
         PMR_CAPTURE: capture,
       },
     });
+    const summaryText = await readFile(summary, "utf8");
+    assert.equal(typeof sha, "string");
+    assert.match(summaryText, new RegExp("配布用コミット: `" + sha + "`"));
+    assert.match(
+      summaryText,
+      new RegExp("固定参照: `example/project@" + sha + "`"),
+    );
+    assert.match(
+      summaryText,
+      /検証 run: https:\/\/github\.com\/example\/project\/actions\/runs\/1/,
+    );
+    assert.equal(summaryText.includes("配布ブランチ"), false);
     const listed = (await exec("tar", ["-tzf", capture])).stdout
       .trim()
       .split("\n")
