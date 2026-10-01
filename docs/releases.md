@@ -1,8 +1,42 @@
 # リリース手順
 
-公開担当者は、**配布準備 PR を手動作成 → main にマージ → タグを push → 公開確認 → 参照更新 PR**の順に進めます。Release workflow の手動実行や配布準備 PR の自動作成は行いません。
+名前 `Release on merge` の Cursor Automation が、デフォルトブランチへマージされた pull request ごとに下の「Cursor Automation」を実行します。トリガーは Pull request merged だけです。配布準備 PR は Automation が開き、人がレビューしてマージします。自動マージと自動承認はしません。タグの push で Release workflow が GitHub Release を作ります。Automation は `gh release create` を実行しません。
 
 正本は [CI](../.github/workflows/ci.yml)、[Release workflow](../.github/workflows/release.yml)、[タグ・配布物の検証](../scripts/validate_release.sh)、[公開スクリプト](../scripts/publish_release.sh)です。
+
+## Cursor Automation
+
+Automation のプロンプトは次の1文にします。手順の変更はこの節を更新します。
+
+> デフォルトブランチへマージされた pull request について、`docs/releases.md` の「Cursor Automation」に従って公開する。
+
+1. マージ先がデフォルトブランチでなければ終了する。
+2. マージコミットの40桁 SHA を確定する。短い SHA は使わない。
+3. 名前 `CI` のワークフローが、その SHA へのデフォルトブランチ push として `test` と `bundle` の両方に成功するまで待つ。失敗した、または結果を確認できない場合は終了する。成功した run の URL と ID を控える。artifact は、この push 実行の `action-bundle` だけを使う。
+4. artifact を空の `evidence/` ディレクトリへダウンロードし、`npm run check:dist -- <そのディレクトリ>` が成功することを確認する。マージコミットの `dist/index.js`、`dist/package.json`、`dist/SHA256SUMS` と checksum が一致するかを比べる。`dist/` が無ければ不一致とする。`evidence/` はコミットしない。Dev Container が無い環境では `npm` を直接実行する。
+5. 一致する場合は手順 7 へ進む。その SHA に `vX.Y.Z` タグがあり、対応する GitHub Release が `pr-merge-readiness-action.tar.gz` を含む場合は終了する。
+6. 不一致の場合はタグを作らない。
+   - マージ差分が `dist/index.js`、`dist/package.json`、`dist/SHA256SUMS` だけなら終了する。
+   - 同じソース SHA を本文に持つ未マージの配布準備 PR があれば終了する。
+   - 次のバージョンを決める。最新の `vX.Y.Z` から上げる。ラベルがなければ patch を 1 つ上げる。`release:minor` なら minor、`release:major` なら major にする。両方が付いている場合は終了する。`package.json` の version はタグに使わない。既存タグは動かさない。
+   - ソース SHA からブランチ `prepare-vX.Y.Z` を切る。実行環境が接頭辞を要求する場合だけ、その接頭辞を付ける。artifact の3ファイルだけを `dist/` へ置き `git add -f` する。他のファイルは変更しない。`npm run check:dist` が成功してからコミットする。ローカルの `npm run build` 成果物はコミットしない。
+   - タイトル `prepare vX.Y.Z` の pull request を開いて終了する。マージしない。本文に次を入れる。
+
+     ソース: `nimiusrd/pr-merge-readiness-action@<ソースの40桁SHA>`
+
+     検証: <成功したCIのURL>
+
+     バージョン: vX.Y.Z
+7. タグを push する。
+   - pull request が `prepare vX.Y.Z` で、そのタグが未使用ならそのバージョンを使う。それ以外は手順 6 と同じ規則で次のバージョンを決める。選んだタグが別のコミットを指している場合は終了する。
+   - 次だけを実行する。ブランチ名は指定しない。
+
+     ```sh
+     git tag -a "vX.Y.Z" "<マージコミットの40桁SHA>" -m "vX.Y.Z"
+     git push origin "refs/tags/vX.Y.Z"
+     ```
+   - 名前 `Release` のワークフローが、そのタグの push として `verify` と `publish` の両方に成功するまで待つ。失敗した場合はタグを削除も移動もせず、失敗した run の URL を残して終了する。
+   - 成功した GitHub Release の URL を結果として残す。固定参照は、タグが指す配布用コミットの40桁 SHA である。Release が Immutable で、`pr-merge-readiness-action.tar.gz` を含むことを確認する。参照 SHA の更新 PR はこの実行では作らない。
 
 ## 配布物と実行環境
 
@@ -30,7 +64,7 @@ devcontainer exec --workspace-folder . npm run test:bundle
 
 出力先は Git 管理外の `build/dist/` です。追跡済み `dist/` はローカルビルドで更新しません。バンドルテストは `node_modules` のない一時ディレクトリに配布ファイルだけを配置し、入力検証と HTTP による Action 実行を確認します。
 
-## 配布準備 PR を手動で作成する
+## 配布準備 PR を作る
 
 1. 公開するソースを main にマージし、そのコミットの CI `test`・`bundle` が成功するのを待ちます。main の push CI は検証済み `action-bundle` artifact を7日間保存します。PR の CI artifact は配布に使いません。
 2. 未使用の `vMAJOR.MINOR.PATCH` を決めます。先頭ゼロ、prerelease、build metadata は受け付けません。`package.json` の version はタグとは独立しています。
@@ -63,7 +97,7 @@ git rm --ignore-unmatch dist/cli.js dist/THIRD_PARTY_LICENSES.txt
 git add -f dist/index.js dist/package.json dist/SHA256SUMS
 ```
 
-5. バージョン・CI run URL・ソース SHA・変更と検証の要約を記載して、手動で配布準備 PR を作ります。ソース変更は混ぜません。CI `bundle` は配布物がある場合、ローカルでのビルドより先に checksum と同梱バンドルのテストを実行します。CI 成功後に main にマージします。
+5. バージョン・CI run URL・ソース SHA・変更と検証の要約を記載して、配布準備 PR を開きます。ソース変更は混ぜません。CI `bundle` は配布物がある場合、ローカルでのビルドより先に checksum と同梱バンドルのテストを実行します。人がレビューし、CI 成功後に main にマージします。
 
 **artifact のソース SHA からタグ対象コミットまでに、製品ソース・依存 lock・ビルド設定の変更がないことをレビューで確認してください。** 変更や artifact の期限切れがあれば、新しい main CI artifact で準備し直します。checksum とバンドルテストだけではソースとの完全な対応を証明できません。
 
@@ -121,7 +155,7 @@ Draft の復旧では元の `verify` 成功を確認し、タグ内の3ファイ
 
 ## 公開記録
 
-新しいリリース用の配布ブランチは作りません。既存 v0.4.0 は旧方式で公開したため、タグと `codex/releases/v0.4.0` は配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` を指したまま保持します。過去のタグ・コミットは書き換えず、v0.5.0〜v0.7.0 は旧 Release workflow が main に配布物をコミットしてタグを作成しました。今後は手動の配布準備 PR とタグ push で公開します。
+新しいリリース用の配布ブランチは作りません。既存 v0.4.0 は旧方式で公開したため、タグと `codex/releases/v0.4.0` は配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` を指したまま保持します。過去のタグ・コミットは書き換えず、v0.5.0〜v0.7.0 は旧 Release workflow が main に配布物をコミットしてタグを作成しました。今後は Cursor Automation が開く配布準備 PR と、人がマージしたコミットへのタグ push で公開します。
 
 [v0.5.0 の Release run](https://github.com/nimiusrd/pr-merge-readiness-action/actions/runs/34994639892)では、ソース `e6d305d05cce80eae0411cfb33845b4aef8a6e58` のテスト・静的検査・両 CPU のバイナリ検証が成功し、配布用コミット `4790eda7e56840c18a98a1d4c135ab03c119b5f2` を main とタグに公開しました。`labels = "auto"` に対応する最初のリリースです。
 
