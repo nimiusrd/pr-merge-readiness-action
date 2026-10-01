@@ -200,7 +200,7 @@ export async function collect(
       before.head_sha !== options.expectedHead
     )
       throw new ProposalHeadChanged(
-        "PR head differs from validated proposal before observation",
+        "PR head differs from event head before observation",
       );
     facts.pr = before;
     const files = (await api.pages(`/pulls/${number}/files`)).map((raw) => ({
@@ -256,7 +256,7 @@ export async function collect(
       after.head_sha !== options.expectedHead
     )
       throw new ProposalHeadChanged(
-        "PR head changed after proposal validation during observation",
+        "PR head differs from event head during observation",
       );
     const fields = [
       "number",

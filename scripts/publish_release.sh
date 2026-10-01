@@ -15,11 +15,11 @@ cat > "$notes" <<EOF
 
 Node.js 24 で実行する TypeScript 製 Action の JavaScript バンドルです。
 利用側の uses を配布用コミット $release_sha に固定してください。
-設定 version 4 が必要です。docs/workflow.md に従って設定と workflow を同時に移行してください。
+閾値は with.stale-change-review-days で指定します。docs/workflow.md に従って workflow を移行してください。
 利用側で Node.js のセットアップ・依存インストール・ビルドは行いません。
 EOF
 tar -C dist -czf "$artifacts_dir/pr-merge-readiness-action.tar.gz" \
-  index.js cli.js package.json THIRD_PARTY_LICENSES.txt SHA256SUMS
+  index.js package.json SHA256SUMS
 gh release create "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag \
   --title "$RELEASE_VERSION" --notes-file "$notes" \
   "$artifacts_dir/pr-merge-readiness-action.tar.gz"

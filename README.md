@@ -4,7 +4,7 @@ GitHub の標準ルールでは表現できない追加確認事項を、PR の�
 
 [Action の責務](docs/responsibilities.md)と[推奨 Ruleset](docs/rulesets.md)に役割分担を記載しています。承認数・未解決スレッド・CI の結果・特定パスの担当者レビューは GitHub に委ねます。
 
-[v0.7.0](https://github.com/nimiusrd/pr-merge-readiness-action/releases/tag/v0.7.0) は設定 version 4 に対応しています。以下の利用例は、このリリースの40桁 SHA に固定しています。v0.6.0（version 3）から更新する場合は、[移行手順](docs/workflow.md#version-3-から-version-4-への移行)に従って設定と workflow を同時に更新してください。
+設定ファイルからの切り替えは[移行手順](docs/workflow.md)を参照してください。
 
 ## 概要
 
@@ -22,13 +22,12 @@ GitHub の標準ルールでは表現できない追加確認事項を、PR の�
 
 以下の導入例は `ubuntu-26.04` を使います。TypeScript 版では OS・CPU ごとの配布バイナリを使用しません。実行環境には Node.js 24 対応の GitHub Actions runner が必要です。
 
-この checkout は TypeScript 版の開発ソースです。以下の固定 SHA は公開済みの Python 版 v0.7.0 を指します。TypeScript 版の配布準備・公開後に、導入例と運用 workflow の参照を更新してください。
+この checkout は TypeScript 版の開発ソースです。`with` 入力はこの開発ソースからの配布版で利用できます。公開済みの Python 版 v0.7.0 は未対応です。導入例の `<RELEASE_COMMIT_SHA>` は、対応版の公開後にリリースタグが指す40桁 SHA へ置き換えてください。
 
 ## 導入
 
-1. [最小設定](examples/minimal.toml)を `.github/pr-merge-readiness.toml` にコピーします。
-2. 次の workflow を `.github/workflows/pr-merge-readiness.yml` に保存します。
-3. default branch に反映します。以降は PR の更新時に実行され、Actions の **Run workflow** からも更新できます。
+1. 次の workflow を `.github/workflows/pr-merge-readiness.yml` に保存します。
+2. default branch に反映します。以降は PR の更新時に実行され、Actions の **Run workflow** からも更新できます。
 
 ```yaml
 # uses をリリースタグが指す40桁 SHA に固定します。
@@ -43,8 +42,6 @@ on:
         description: PR 番号（空欄なら全 open PR と終了済み PR のラベルを同期）
         type: string
         default: ''
-  push:
-    paths: [.github/pr-merge-readiness.toml, .github/workflows/pr-merge-readiness.yml]
 
 permissions: {}
 
@@ -61,7 +58,9 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@fc422aad51c2a719cc7b625afb5e3939b4f52868 # v0.7.0
+      - uses: nimiusrd/pr-merge-readiness-action@<RELEASE_COMMIT_SHA>
+        with:
+          stale-change-review-days: '30'
 ```
 
 手動実行の対象は次のとおりです。
@@ -72,16 +71,7 @@ jobs:
 
 ## 設定
 
-設定は変更履歴の閾値だけです。日数は正の整数を指定します。不要なキーや旧版の設定はエラーになります。
-
-```toml
-version = 4
-
-[review]
-stale_change_review_days = 30
-```
-
-[14日を閾値にする例](examples/review-policy.toml)もあります。一般の必要承認数と会話解決は Ruleset で設定します。
+設定は workflow の `with.stale-change-review-days` に指定します。既定値は `30` です。日数は正の整数（安全に扱える整数の範囲）で指定し、`0`・小数・指数表記はエラーになります。14日を閾値にする場合は `stale-change-review-days: '14'` に変更します。設定ファイルは読み込みません。一般の必要承認数と会話解決は Ruleset で設定します。
 
 ## 判定内容
 
@@ -102,11 +92,11 @@ stale_change_review_days = 30
 
 ## 実行の流れ
 
-Action は1ステップで、設定の検証 → 観測 → サマリー生成 → ラベル更新を行います。
+Action は1ステップで、入力の検証 → 観測 → サマリー生成 → ラベル更新を行います。
 
 ### 設定の扱い
 
-PR イベントでは提案された設定を検証し、実際の判定には default branch で一度確定した設定を使用します。実行サマリーには使用した設定コミットも表示します。
+実行中の workflow が Action に渡した `with` の値で判定します。PR の head や default branch から設定ファイルを取得しません。使用した閾値は各 PR のサマリーに表示します。
 
 ### 成功と失敗
 
@@ -131,13 +121,12 @@ JSON artifact・参考 Check・オフライン再評価は提供しません。
 
 | 入力 | 既定値・用途 |
 | --- | --- |
-| `config-path` | `.github/pr-merge-readiness.toml` |
+| `stale-change-review-days` | `30`（追加の人間レビューを要求する閾値日数） |
 | `token` | `github.token` |
 
 | 出力 | 内容 |
 | --- | --- |
-| `operation` | `observe` / `validate-config` / `skip` |
-| `config-sha` | 読み取った設定コミット |
+| `operation` | `observe` / `skip` |
 
 Action の版は `uses:` の40桁 SHA だけで指定します。実際の参照を GitHub のコンテキストから取得し、40桁 SHA と提供元を確認します。local Action（`uses: ./path`）は非対応です。`operation` を入力で指定する機能はありません。
 
@@ -158,7 +147,7 @@ devcontainer exec --workspace-folder . npm run check:dist -- build/dist
 devcontainer exec --workspace-folder . npm run test:bundle
 ```
 
-ローカル設定の検証は `npm run validate-config -- --config <path>` を使います。開発用バンドルは `build/dist/` に生成し、追跡済み `dist/` は上書きしません。配布物の検証・公開は[リリース手順](docs/releases.md)を参照してください。
+開発用バンドルは `build/dist/` に生成し、追跡済み `dist/` は上書きしません。配布物の検証・公開は[リリース手順](docs/releases.md)を参照してください。
 
 ## ライセンス
 

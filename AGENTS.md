@@ -15,4 +15,4 @@
 
 - Docker・devcontainer CLI のない VM では Node.js 24・npm を直接用意し、`devcontainer exec --workspace-folder . <command>` を `<command>` に読み替える。
 - `npm ci` で lock に固定した依存を導入する。提出前チェックとバンドル検証は上記と同じコマンドを使う。
-- ローカル設定検証は `npm run validate-config -- --config <path>` を使う。
+- Action の設定は workflow の `with` に指定する。設定ファイル・設定検証 CLI は提供しない。

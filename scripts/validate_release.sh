@@ -17,12 +17,12 @@ test "$remote_sha" = "$release_sha"
 git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
 git merge-base --is-ancestor "$release_sha" refs/remotes/origin/main
 
-# 配布物はバンドル済み JS・依存ライセンス・checksum だけ。symlink は拒否する。
-test "$(git ls-tree -r --name-only HEAD dist/)" = $'dist/SHA256SUMS\ndist/THIRD_PARTY_LICENSES.txt\ndist/cli.js\ndist/index.js\ndist/package.json'
-for file in SHA256SUMS THIRD_PARTY_LICENSES.txt cli.js index.js package.json; do
+# 配布物はバンドル済み JS・module 宣言・checksum だけ。symlink は拒否する。
+test "$(git ls-tree -r --name-only HEAD dist/)" = $'dist/SHA256SUMS\ndist/index.js\ndist/package.json'
+for file in SHA256SUMS index.js package.json; do
   [[ "$(git ls-tree HEAD "dist/$file")" == '100644 blob '* ]]
 done
 (
   cd dist
-  test "$(cat SHA256SUMS)" = "$(sha256sum THIRD_PARTY_LICENSES.txt cli.js index.js package.json)"
+  test "$(cat SHA256SUMS)" = "$(sha256sum index.js package.json)"
 )

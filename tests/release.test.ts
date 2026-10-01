@@ -17,12 +17,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { checkDistribution } from "../scripts/check-dist.js";
 const exec = promisify(execFile);
-const files = [
-  "THIRD_PARTY_LICENSES.txt",
-  "cli.js",
-  "index.js",
-  "package.json",
-];
+const files = ["index.js", "package.json"];
 async function checksums(directory: string) {
   const hashes = await Promise.all(
     files.map(
@@ -144,10 +139,10 @@ for (const kind of ["checksum", "extra", "missing", "symlink"])
       if (kind === "checksum")
         await writeFile(join(c.dist, "index.js"), "tampered");
       if (kind === "extra") await writeFile(join(c.dist, "extra.js"), "extra");
-      if (kind === "missing") await rm(join(c.dist, "cli.js"));
+      if (kind === "missing") await rm(join(c.dist, "package.json"));
       if (kind === "symlink") {
-        await rm(join(c.dist, "cli.js"));
-        await symlink("index.js", join(c.dist, "cli.js"));
+        await rm(join(c.dist, "package.json"));
+        await symlink("index.js", join(c.dist, "package.json"));
       }
       await c.commit();
       c.env.GITHUB_SHA = (await c.git("rev-parse", "HEAD")).stdout.trim();
@@ -184,7 +179,7 @@ test("リモートタグの移動を検出する", async () => {
     await c.close();
   }
 });
-test("公開スクリプトはタグ内の5ファイルだけを梱包し remote を変更しない", async () => {
+test("公開スクリプトはタグ内の3ファイルだけを梱包し remote を変更しない", async () => {
   const c = await fixture();
   try {
     const stub = join(c.root, "bin");

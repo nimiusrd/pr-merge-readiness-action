@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,15 +7,14 @@ import {
   actionMain,
   manualPrNumber,
   output,
-  trustedConfig,
   verifySource,
 } from "../src/runtime.js";
-import { ACTION_REPOSITORY } from "../src/config.js";
+import { ACTION_REPOSITORY } from "../src/inputs.js";
 import { DECISION_LABELS } from "../src/publish.js";
 import { object } from "../src/contracts.js";
 import {
   ACTION_SHA,
-  BASE,
+  AT,
   HEAD,
   OLD,
   FixtureReader,
@@ -23,6 +22,11 @@ import {
   prEvent,
   pull,
 } from "./support.js";
+// 履歴・承認の fixture と時計を揃え、実行日でレビュー要否が変わらないようにする。
+beforeEach((t) => {
+  assert.ok("mock" in t);
+  t.mock.timers.enable({ apis: ["Date"], now: new Date(AT) });
+});
 async function context() {
   const root = await mkdtemp(join(tmpdir(), "pmr-runtime-"));
   const reader = new FixtureReader(),
@@ -31,7 +35,11 @@ async function context() {
     join(root, "event.json"),
     JSON.stringify({ inputs: { "pr-number": "1" } }),
   );
-  const env = {
+  const env: NodeJS.ProcessEnv & {
+    GITHUB_EVENT_PATH: string;
+    GITHUB_OUTPUT: string;
+    GITHUB_STEP_SUMMARY: string;
+  } = {
     INPUT_TOKEN: "test-token",
     GITHUB_REPOSITORY: reader.repository,
     GITHUB_EVENT_NAME: "workflow_dispatch",
@@ -50,19 +58,6 @@ async function context() {
     close: () => rm(root, { recursive: true, force: true }),
   };
 }
-test("設定取得は default branch を一度だけ解決し以降 SHA に固定する", async () => {
-  const api = new FixtureReader();
-  const [config, pinned] = await trustedConfig(api, ".github/a&b.toml");
-  assert.equal(pinned, BASE);
-  assert.equal(api.requests.length, 3);
-  assert.ok(api.requests[2]!.endsWith(`a%26b.toml?ref=${BASE}`));
-  api.requests = [];
-  assert.deepEqual(await trustedConfig(api, ".github/a&b.toml", pinned), [
-    config,
-    pinned,
-  ]);
-  assert.equal(api.requests.length, 1);
-});
 for (const reference of ["", "main", "v1", HEAD.slice(1), HEAD.toUpperCase()])
   test(`remote Action の SHA 固定を検証: ${reference}`, () => {
     assert.throws(() =>
@@ -100,7 +95,7 @@ test("単一 PR の手動観測は設定・Summary・ラベルを一度の実行
     assert.deepEqual(c.writer.names(), [DECISION_LABELS.SHADOW_CONDITIONS_MET]);
     assert.equal(
       await readFile(c.env.GITHUB_OUTPUT, "utf8"),
-      `operation=observe\nconfig-sha=${BASE}\n`,
+      "operation=observe\n",
     );
     assert.ok(
       (await readFile(c.env.GITHUB_STEP_SUMMARY, "utf8")).includes(
@@ -128,7 +123,7 @@ for (const action of [
   "converted_to_draft",
   "closed",
 ])
-  test(`PR ${action} は提案を検証し default policy で判定する`, async () => {
+  test(`PR ${action} はwith の閾値で判定する`, async () => {
     const c = await context();
     try {
       c.env.GITHUB_EVENT_NAME = "pull_request";
@@ -139,19 +134,17 @@ for (const action of [
           1,
           pull([DECISION_LABELS.HUMAN_REVIEW_REQUIRED], "closed"),
         );
-      c.reader.proposal = c.reader.proposal.replace("= 30", "= 1");
+      c.env["INPUT_STALE-CHANGE-REVIEW-DAYS"] = "30";
       await writeFile(c.env.GITHUB_EVENT_PATH, JSON.stringify(event));
       assert.equal(await actionMain(c), 0);
-      assert.ok(c.reader.requests[0]!.endsWith(`?ref=${HEAD}`));
       assert.deepEqual(
         c.writer.names(),
         action === "closed" ? [] : [DECISION_LABELS.SHADOW_CONDITIONS_MET],
       );
-      assert.equal(
-        c.reader.requests.filter((path) =>
-          path.endsWith("/git/ref/heads/trunk"),
-        ).length,
-        1,
+      assert.ok(
+        !c.reader.requests.some(
+          (path) => path.includes("/contents/") || path.includes("/git/ref/"),
+        ),
       );
       assert.ok(!c.reader.paths.some((path) => path.endsWith("/reviews")));
     } finally {
@@ -192,7 +185,7 @@ for (const reason of [
       await c.close();
     }
   });
-for (const name of ["schedule", "workflow_run", "pull_request_review"])
+for (const name of ["push", "schedule", "workflow_run", "pull_request_review"])
   test(`他イベントは payload 読み込み前に省略: ${name}`, async () => {
     const c = await context();
     try {
@@ -205,40 +198,32 @@ for (const name of ["schedule", "workflow_run", "pull_request_review"])
       await c.close();
     }
   });
-test("push はイベント payload を読まず対象コミットの設定だけを検証する", async () => {
-  const c = await context();
-  try {
-    c.env.GITHUB_EVENT_NAME = "push";
-    await rm(c.env.GITHUB_EVENT_PATH);
-    assert.equal(await actionMain(c), 0);
-    assert.deepEqual(c.reader.requests, [
-      `${c.reader.prefix}/contents/.github/pr-merge-readiness.toml?ref=${HEAD}`,
-    ]);
-    assert.equal(c.reader.paths.length, 0);
-    assert.equal(c.writer.calls.length, 0);
-    assert.equal(
-      await readFile(c.env.GITHUB_OUTPUT, "utf8"),
-      `operation=validate-config\nconfig-sha=${HEAD}\n`,
-    );
-  } finally {
-    await c.close();
-  }
-});
-for (const eventName of ["pull_request", "push"])
-  test(`不正提案なら default 設定も観測も公開も行わない: ${eventName}`, async () => {
+for (const value of ["", "0", "-1", "30.0", "3e1", "9007199254740992"])
+  test(`不正な with 入力を API 前に拒否: ${value}`, async () => {
     const c = await context();
     try {
-      c.env.GITHUB_EVENT_NAME = eventName;
-      c.reader.proposal = "unknown = true\n" + c.reader.proposal;
-      await writeFile(c.env.GITHUB_EVENT_PATH, JSON.stringify(prEvent()));
+      c.env["INPUT_STALE-CHANGE-REVIEW-DAYS"] = value;
       assert.equal(await actionMain(c), 1);
-      assert.equal(c.reader.requests.length, 1);
+      assert.equal(c.reader.requests.length, 0);
       assert.equal(c.reader.paths.length, 0);
       assert.equal(c.writer.calls.length, 0);
     } finally {
       await c.close();
     }
   });
+test("with の閾値変更がレビュー要否に反映される", async () => {
+  const c = await context();
+  try {
+    c.env["INPUT_STALE-CHANGE-REVIEW-DAYS"] = "1";
+    c.reader.reviews = [];
+    assert.equal(await actionMain(c), 0);
+    assert.deepEqual(c.writer.names(), [DECISION_LABELS.HUMAN_REVIEW_REQUIRED]);
+    assert.ok(c.reader.paths.some((path) => path.endsWith("/reviews")));
+    assert.ok(!c.reader.requests.some((path) => path.includes("/contents/")));
+  } finally {
+    await c.close();
+  }
+});
 for (const inputs of [
   { "pr-number": "01" },
   { "pr-number": "-1" },

@@ -4,7 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseDocument } from "yaml";
-import { ACTION_REPOSITORY, parseConfig } from "../src/config.js";
+import { ACTION_REPOSITORY, positive } from "../src/inputs.js";
 import { object } from "../src/contracts.js";
 import type { JsonObject } from "../src/contracts.js";
 export function parseYaml(text: string): JsonObject {
@@ -22,13 +22,14 @@ function steps(job: unknown): JsonObject[] {
 }
 export function checkActionFlow(action: JsonObject): void {
   assert.deepEqual(Object.keys(object(action.inputs)).sort(), [
-    "config-path",
+    "stale-change-review-days",
     "token",
   ]);
-  assert.deepEqual(Object.keys(object(action.outputs)).sort(), [
-    "config-sha",
-    "operation",
-  ]);
+  assert.deepEqual(Object.keys(object(action.outputs)), ["operation"]);
+  assert.equal(
+    object(object(action.inputs)["stale-change-review-days"]).default,
+    "30",
+  );
   assert.deepEqual(action.runs, { using: "node24", main: "dist/index.js" });
   assert.equal(
     object(object(action.inputs).token).default,
@@ -40,6 +41,7 @@ export function checkActionFlow(action: JsonObject): void {
 export function checkRuntime(
   workflow: JsonObject,
   allowPlaceholder = false,
+  legacy = false,
 ): void {
   assert.deepEqual(workflow.permissions, {});
   assert.ok(!Object.hasOwn(workflow, "concurrency"));
@@ -64,7 +66,16 @@ export function checkRuntime(
   assert.deepEqual(Object.keys(manual), ["pr-number"]);
   const calls = steps(job);
   assert.equal(calls.length, 1);
-  assert.deepEqual(Object.keys(calls[0]!), ["uses"]);
+  assert.deepEqual(
+    Object.keys(calls[0]!),
+    legacy ? ["uses"] : ["uses", "with"],
+  );
+  if (!legacy) {
+    assert.deepEqual(Object.keys(object(calls[0]!.with)), [
+      "stale-change-review-days",
+    ]);
+    positive(String(object(calls[0]!.with)["stale-change-review-days"]));
+  }
   const reference = calls[0]!.uses;
   if (!(
     allowPlaceholder &&
@@ -94,7 +105,6 @@ export async function checkWorkflows(): Promise<void> {
   checkRuntime(example, true);
   assert.deepEqual(Object.keys(object(example.on)).sort(), [
     "pull_request",
-    "push",
     "workflow_dispatch",
   ]);
   assert.deepEqual(object(example.on).pull_request, {
@@ -121,8 +131,11 @@ export async function checkWorkflows(): Promise<void> {
     const workflow = await load(`.github/workflows/${filename}`);
     workflows.push(workflow);
     if (filename === "pr-merge-readiness.yml") {
-      checkRuntime(workflow);
-      assert.deepEqual(workflow.on, example.on);
+      // 公開済み v0.7.0 の運用は配布後に切り替える。
+      checkRuntime(workflow, false, true);
+      const events = { ...object(workflow.on) };
+      delete events.push;
+      assert.deepEqual(events, example.on);
     }
   }
   let nodeSetups = 0;
@@ -219,9 +232,6 @@ export async function checkWorkflows(): Promise<void> {
       (step) => object(step.env ?? {}).PMR_TEST_BUNDLE === "dist/index.js",
     ),
   );
-  for (const filename of await readdir("examples"))
-    if (filename.endsWith(".toml"))
-      parseConfig(await readFile(`examples/${filename}`, "utf8"));
 }
 if (
   process.argv[1] &&
