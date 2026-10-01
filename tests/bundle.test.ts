@@ -7,13 +7,13 @@ import { once } from "node:events";
 import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { ACTION_REPOSITORY } from "../src/config.js";
-import { ACTION_SHA, BASE, HEAD, OLD, configText, prEvent } from "./support.js";
+import { ACTION_REPOSITORY } from "../src/inputs.js";
+import { ACTION_SHA, BASE, HEAD, OLD, prEvent } from "./support.js";
 const bundle = process.env.PMR_TEST_BUNDLE;
 async function isolated() {
   const root = await mkdtemp(join(tmpdir(), "pmr-bundle-"));
   assert.ok(bundle);
-  for (const name of ["index.js", "cli.js", "package.json"])
+  for (const name of ["index.js", "package.json"])
     await copyFile(join(dirname(resolve(bundle)), name), join(root, name));
   // 利用側が CommonJS のプロジェクトでも、配布物自身の module 宣言を使う。
   await writeFile(
@@ -49,43 +49,6 @@ async function run(
     clearTimeout(timer);
   }
 }
-for (const [text, code] of [
-  [configText, 0],
-  [configText.replace("= 30", "= 30.0"), 1],
-  ["version=4\nversion=4", 1],
-] as const)
-  test(
-    `配布 CLI は Python・npm・依存なしで設定検証: ${code} ${text}`,
-    { skip: !bundle },
-    async () => {
-      const c = await isolated();
-      try {
-        await writeFile(join(c.root, "config.toml"), text);
-        const result = await run(c.root, "cli.js", [
-          "validate-config",
-          "--config",
-          "config.toml",
-        ]);
-        assert.equal(result.code, code, result.stderr);
-        assert.equal(
-          JSON.parse(result.stdout).valid,
-          code === 0 ? true : undefined,
-        );
-      } finally {
-        await c.close();
-      }
-    },
-  );
-test("配布 CLI の引数不足は失敗する", { skip: !bundle }, async () => {
-  const c = await isolated();
-  try {
-    const result = await run(c.root, "cli.js", ["validate-config"]);
-    assert.equal(result.code, 1);
-    assert.ok(result.stdout.includes("usage:"));
-  } finally {
-    await c.close();
-  }
-});
 test(
   "Action の remote source 検証は配布版でも動作する",
   { skip: !bundle },
@@ -158,21 +121,11 @@ for (const mode of ["push", "observe", "stale", "error", "skip", "drift"])
               },
             },
           };
-        } else if (path === "/repos/example/project")
-          data = { default_branch: "main" };
-        else if (path.endsWith("/git/ref/heads/main"))
-          data = { object: { sha: BASE } };
-        else if (path.includes("/contents/")) {
-          if (mode === "error") {
-            response.writeHead(403);
-            response.end("DO NOT EXPOSE");
-            return;
-          }
-          data = {
-            type: "file",
-            encoding: "base64",
-            content: Buffer.from(configText).toString("base64"),
-          };
+        } else if (
+          path.includes("/contents/") ||
+          path.endsWith("/git/ref/heads/main")
+        ) {
+          throw new Error("設定ファイルを取得してはいけない");
         } else if (path.includes("/files?"))
           data = [
             {
@@ -190,7 +143,7 @@ for (const mode of ["push", "observe", "stale", "error", "skip", "drift"])
               commit: {
                 committer: {
                   date: new Date(
-                    Date.now() - (mode === "stale" ? 31 : 10) * 86400000,
+                    Date.now() - (mode === "stale" ? 15 : 10) * 86400000,
                   ).toISOString(),
                 },
               },
@@ -231,6 +184,7 @@ for (const mode of ["push", "observe", "stale", "error", "skip", "drift"])
         summaryPath = join(c.root, "summary");
       const result = await run(c.root, "index.js", [], {
         INPUT_TOKEN: "bundle-token",
+        "INPUT_STALE-CHANGE-REVIEW-DAYS": mode === "error" ? "0" : "14",
         GITHUB_ACTION_REF: ACTION_SHA,
         GITHUB_ACTION_REPOSITORY: ACTION_REPOSITORY,
         GITHUB_REPOSITORY: "example/project",
@@ -248,11 +202,9 @@ for (const mode of ["push", "observe", "stale", "error", "skip", "drift"])
         result.stdout + result.stderr,
       );
       if (mode === "push") {
-        assert.equal(paths.length, 1);
+        assert.equal(paths.length, 0);
         assert.ok(
-          (await readFile(outputPath, "utf8")).includes(
-            "operation=validate-config",
-          ),
+          (await readFile(outputPath, "utf8")).includes("operation=skip"),
         );
       } else if (mode === "skip") {
         assert.equal(paths.length, 0);

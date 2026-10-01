@@ -5,10 +5,6 @@ export type Decision =
 export interface Policy {
   stale_change_review_days: number;
 }
-export interface Config {
-  version: 4;
-  review: Policy;
-}
 export interface PullRequest {
   number: number;
   state: string;

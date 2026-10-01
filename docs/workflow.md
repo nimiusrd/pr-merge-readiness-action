@@ -1,17 +1,16 @@
 # 運用と移行
 
-この文書は v0.7.0（設定 version 4）の動作を説明します。v0.6.0 は version 3 を使用します。責務は[Action の責務](responsibilities.md)、GitHub 側で担保する条件は[推奨 Ruleset](rulesets.md)を参照してください。
+この文書は `with` 入力を使う開発ソースの動作を説明します。公開済み v0.7.0 は TOML 設定を使用します。責務は[Action の責務](responsibilities.md)、GitHub 側で担保する条件は[推奨 Ruleset](rulesets.md)を参照してください。
 
 ## 実行対象
 
 | イベント | 処理 |
 | --- | --- |
-| PR の作成・再オープン・追加 push・Draft 切替・base 編集 | 提案設定を検証し、default branch の設定でその PR を判定・ラベル更新 |
+| PR の作成・再オープン・追加 push・Draft 切替・base 編集 | `with` の閾値でその PR を判定・ラベル更新 |
 | PR 終了 | 対象 PR を判定し、管理ラベルを除去 |
 | タイトル・本文だけの編集 | 省略 |
 | Run workflow：PR 番号指定 | その PR を判定・ラベル更新 |
 | Run workflow：番号なし | 全 open PR を判定・ラベル更新し、終了済み PR の管理ラベルも除去 |
-| push | push 先の SHA の設定を検証 |
 | その他 | 省略 |
 
 同一リポジトリの通常 PR だけを自動処理します。fork・Dependabot・作成元リポジトリが削除された PR は自動処理を省略します。手動同期ではこれらも観測しますが、管理ラベルは除去します。
@@ -20,7 +19,7 @@
 
 ## 設定と公開
 
-PR のソースコードは checkout・実行しません。PR イベントの head で設定を検証した後、default branch の設定コミットを一度だけ確定して判定します。提案が不正な場合はそこで失敗します。
+PR のソースコードは checkout・実行しません。実行中の workflow の `with.stale-change-review-days` を使い、入力が不正な場合は API 取得とラベル更新の前に失敗します。既定値は30日です。設定ファイルや設定コミットの取得は行いません。
 
 全対象の観測が完了してからサマリーとラベルを更新します。PR イベントの head が待機中・観測中に変わった場合は公開を止め、公開直前の head が変わった場合もラベル更新を省略します。レビュー対象の base が変わっていれば再観測ラベルにします。
 
@@ -30,39 +29,12 @@ PR のソースコードは checkout・実行しません。PR イベントの h
 
 同じリポジトリのラベル更新 job は concurrency group を `autonomous-merge-check-writer` に統一します。旧版と同じ group を維持することで移行時も更新を直列化します。`cancel-in-progress: false`・`queue: max` を使用し、待機枠が満杯で要求がキャンセルされた場合は再実行してください。
 
-## version 3 から version 4 への移行
+## 設定ファイルから with への移行
 
-v0.7.0 では `minimum_approvals`・`require_resolved_threads` と、それに対応する判定を削除しました。version 3 や削除済みキーは受け付けません。v0.6.0 は version 4 に対応していないため、設定と Action の参照先を同時に更新します。
+1. 対応版の公開後、workflow の `uses:` をリリースタグが指す40桁 SHA に変更します。公開済み v0.7.0 は `with` の閾値を扱えません。
+2. TOML の `review.stale_change_review_days` を Action step の `with.stale-change-review-days` に移します。省略時は30日です。
+3. `config-path` 入力、設定ファイル、設定検証用の `push` トリガーを削除します。
+4. `config-sha` 出力と `validate-config` operation を参照する処理を削除します。設定検証 CLI も廃止しました。
+5. default branch に反映し、Run workflow でラベルを同期します。
 
-1. [推奨 Ruleset](rulesets.md)を参考に、必要な承認数・会話解決・CI・CODEOWNERS のルールを GitHub 側で管理します。
-2. TOML の `version` を `4` にし、`[review]` の `minimum_approvals` と `require_resolved_threads` を削除します。`stale_change_review_days` はそのまま使います。
-3. workflow の `uses:` を v0.7.0 の配布用 SHA `fc422aad51c2a719cc7b625afb5e3939b4f52868` に変更します。[利用例](../examples/pr-merge-readiness.yml)もこの SHA に固定しています。
-4. 設定と workflow を同じコミットで default branch に反映し、Run workflow でラベルを同期します。旧 `shadow/レビュー待ち` も除去されます。
-
-移行中は、旧 Action が提案された version 4 を拒否し、新 Action は default branch に残る version 3 を拒否します。両方の設定を受け付ける互換処理はありません。default branch に設定と参照先を揃えた後、手動実行で確認してください。マージ条件の変更や bypass を Action が行うことはありません。
-
-本リポジトリ自身の `.github/` も v0.7.0・version 4 を使用します。ソース CI は version 4 の例・テストを検証し、運用中の設定は workflow に固定した配布版が検証します。ローカルでビルドした `dist/` の変更は実装 PR に含めません。公開と `.github/` の切り替えは[リリース手順](releases.md)に従います。
-
-## version 2 からの移行
-
-以下は v0.6.0（version 3）へ移行する場合の手順です。version 4 を利用する場合は、上の手順も適用してください。
-
-v0.6.0 は互換性のない簡素化を含みます。v0.5.1 は version 3 を扱えないため、設定と Action の参照先を同時に更新します。
-
-1. TOML の `version` を `3` にし、`[publication]` 全体と `action_ref` を削除します。`[review]` の3項目はそのまま使えます。
-2. workflow を[v0.6.0 の例](https://github.com/nimiusrd/pr-merge-readiness-action/blob/568c7441e16afa46db11bc84f1e4708e6525a404/examples/pr-merge-readiness.yml)に合わせます。v0.6.0 の配布用 SHA は `568c7441e16afa46db11bc84f1e4708e6525a404` です。
-3. `checks: write` 権限と手動入力 `update-labels` を削除します。実行した対象のラベルは常に更新されます。旧版の `labels = "manual"`・`"off"` に相当する観測専用モードはありません。
-4. 個別 operation や artifact 受け渡しの job を使っていた場合は、1 job・1 step の呼び出しに置き換えます。
-5. 設定と workflow を同じコミットで default branch に反映し、Run workflow で PR 番号を空欄にしてラベルを同期します。
-
-移行 PR では、旧版の Action は提案された version 3 を拒否し、新版の Action は default branch に残る version 2 を拒否します。移行完了前に新旧両方を同じ設定で成功させることはできません。これが必須チェックに組み込まれている利用先では、管理者の通常の変更手順で移行を調整してください。default branch に反映した後、新しい workflow を手動実行して確認します。
-
-削除したもの：
-
-- Action 入力の `operation`、`action-ref`、`repository`、`config-sha`、`pr-number`、`event-path`、`report-dir`、`artifact-name`
-- local Action（`uses: ./path`）の呼び出し。提供元の remote Action を、上記の配布用 SHA に固定して指定します。
-- 出力の `checks`、`labels`、`pr-number`、`report-dir`、`manifest`、`artifact-name`
-- 参考 Check の公開、JSON artifact と manifest、CLI の `replay`
-- 公開モードの設定と `update-labels` 入力
-
-手動実行の `pr-number` は workflow の入力として残ります。Action の入力とは異なります。過去の Check は履歴として残り、新版は更新しません。過去 artifact の再評価が必要な場合は、記録と一致する信頼済みの旧版を使用してください。
+[利用例](../examples/pr-merge-readiness.yml)は対応版の SHA を差し込む形式です。本リポジトリの運用 workflow と `.github/pr-merge-readiness.toml` は、公開済み v0.7.0 を動かすために維持しています。対応版の公開後、参照 SHA と `with` を同時に更新し、TOML と `push` トリガーを削除してください。実装 PR では `dist/` を更新しません。配布準備・公開は[リリース手順](releases.md)に従います。

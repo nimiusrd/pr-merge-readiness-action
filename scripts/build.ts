@@ -6,7 +6,7 @@ const outdir = "build/dist";
 await rm(outdir, { recursive: true, force: true });
 await mkdir(outdir, { recursive: true });
 await build({
-  entryPoints: { index: "src/main.ts", cli: "src/cli.ts" },
+  entryPoints: { index: "src/main.ts" },
   outdir,
   bundle: true,
   platform: "node",
@@ -15,17 +15,9 @@ await build({
   legalComments: "inline",
   charset: "utf8",
 });
-await writeFile(
-  `${outdir}/THIRD_PARTY_LICENSES.txt`,
-  await readFile("node_modules/smol-toml/LICENSE", "utf8"),
-);
+
 await writeFile(`${outdir}/package.json`, '{"type":"module"}\n');
-const files = [
-  "THIRD_PARTY_LICENSES.txt",
-  "cli.js",
-  "index.js",
-  "package.json",
-];
+const files = ["index.js", "package.json"];
 const sums = await Promise.all(
   files.map(
     async (file) =>

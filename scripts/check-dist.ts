@@ -4,13 +4,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
-export const DISTRIBUTION_FILES = [
-  "SHA256SUMS",
-  "THIRD_PARTY_LICENSES.txt",
-  "cli.js",
-  "index.js",
-  "package.json",
-];
+export const DISTRIBUTION_FILES = ["SHA256SUMS", "index.js", "package.json"];
 export async function checkDistribution(directory = "dist"): Promise<void> {
   assert.deepEqual((await readdir(directory)).sort(), DISTRIBUTION_FILES);
   for (const file of DISTRIBUTION_FILES)

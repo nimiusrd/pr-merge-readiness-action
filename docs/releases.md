@@ -8,17 +8,15 @@
 
 TypeScript を esbuild で依存ごと JavaScript にバンドルします。実行時は GitHub Actions runner の Node.js 24 を使用します。利用側での checkout、Node.js のセットアップ、依存解決、ビルド、asset のダウンロードは不要です。OS・CPU ごとの実行ファイルは配布しません。Node.js 24 対応 runner を使用してください。
 
-タグ内の `dist/` は次の5ファイルだけです。全て通常のファイルとし、symlink を許可しません。
+タグ内の `dist/` は次の3ファイルだけです。全て通常のファイルとし、symlink を許可しません。
 
 | ファイル | 用途 |
 | --- | --- |
 | `index.js` | `action.yml` が指定する Action の実行入口 |
-| `cli.js` | ローカル設定検証 CLI |
 | `package.json` | バンドル自身の ES module 宣言 |
-| `THIRD_PARTY_LICENSES.txt` | 同梱依存のライセンス |
-| `SHA256SUMS` | 上記4ファイルの SHA-256 |
+| `SHA256SUMS` | 上記2ファイルの SHA-256 |
 
-Release asset は `pr-merge-readiness-action.tar.gz` です。ソースと依存の正本は `.node-version`・ルートの `package.json`・`package-lock.json` です。設定 version は引き続き4です。
+Release asset は `pr-merge-readiness-action.tar.gz` です。ソースと依存の正本は `.node-version`・ルートの `package.json`・`package-lock.json` です。閾値は `with.stale-change-review-days` に指定し、設定ファイルは使用しません。
 
 ## 開発時の検証
 
@@ -30,12 +28,12 @@ devcontainer exec --workspace-folder . npm run check:dist -- build/dist
 devcontainer exec --workspace-folder . npm run test:bundle
 ```
 
-出力先は Git 管理外の `build/dist/` です。追跡済み `dist/` はローカルビルドで更新しません。バンドルテストは `node_modules` のない一時ディレクトリに配布ファイルだけを配置し、設定検証と HTTP による Action 実行を確認します。
+出力先は Git 管理外の `build/dist/` です。追跡済み `dist/` はローカルビルドで更新しません。バンドルテストは `node_modules` のない一時ディレクトリに配布ファイルだけを配置し、入力検証と HTTP による Action 実行を確認します。
 
 ## 配布準備 PR を手動で作成する
 
 1. 公開するソースを main にマージし、そのコミットの CI `test`・`bundle` が成功するのを待ちます。main の push CI は検証済み `action-bundle` artifact を7日間保存します。PR の CI artifact は配布に使いません。
-2. 未使用の `vMAJOR.MINOR.PATCH` を決めます。先頭ゼロ、prerelease、build metadata は受け付けません。`package.json` の version と設定 TOML の version はタグとは独立しています。
+2. 未使用の `vMAJOR.MINOR.PATCH` を決めます。先頭ゼロ、prerelease、build metadata は受け付けません。`package.json` の version はタグとは独立しています。
 3. CI run URL・ソース SHA を記録し、そのソースコミットから配布準備ブランチを作ります。以下の値は実際の値に置き換えます。Git と `gh` はホストで実行します。
 
 ```sh
@@ -57,11 +55,12 @@ gh run download "$PMR_RUN_ID" --repo "$PMR_REPO" --name action-bundle --dir "$PM
 devcontainer exec --workspace-folder . npm run check:dist -- "$PMR_PREP_DIR"
 devcontainer exec --workspace-folder . --remote-env "PMR_PREP_DIR=$PMR_PREP_DIR" bash -euo pipefail -c '
 mkdir -p dist
-for file in index.js cli.js package.json THIRD_PARTY_LICENSES.txt SHA256SUMS; do
+for file in index.js package.json SHA256SUMS; do
   install -m 644 "$PMR_PREP_DIR/$file" "dist/$file"
 done
 '
-git add -f dist/index.js dist/cli.js dist/package.json dist/THIRD_PARTY_LICENSES.txt dist/SHA256SUMS
+git rm --ignore-unmatch dist/cli.js dist/THIRD_PARTY_LICENSES.txt
+git add -f dist/index.js dist/package.json dist/SHA256SUMS
 ```
 
 5. バージョン・CI run URL・ソース SHA・変更と検証の要約を記載して、手動で配布準備 PR を作ります。ソース変更は混ぜません。CI `bundle` は配布物がある場合、ローカルでのビルドより先に checksum と同梱バンドルのテストを実行します。CI 成功後に main にマージします。
@@ -90,13 +89,13 @@ gh run watch "$PMR_RELEASE_RUN_ID" --repo "$PMR_REPO" --exit-status
 
 `verify` はタグ形式、リモートタグのコミット、main 履歴に含まれること、配布物の構成と checksum を確認します。その後ソースのテスト・静的検査と、タグ内の `dist/index.js` のバンドルテストを実行します。Release workflow は再ビルドしません。
 
-`publish` は同じタグと配布物を再確認し、タグ内の5ファイルを tar.gz にまとめて公開します。main・タグ・配布物のコミットを変更しません。公開成功後の Summary にバージョン・配布用 SHA・Release run URL を記載します。タグ対象は main の先端でなくても履歴に含まれていれば公開できます。
+`publish` は同じタグと配布物を再確認し、タグ内の3ファイルを tar.gz にまとめて公開します。main・タグ・配布物のコミットを変更しません。公開成功後の Summary にバージョン・配布用 SHA・Release run URL を記載します。タグ対象は main の先端でなくても履歴に含まれていれば公開できます。
 
 ## 公開後の確認と参照更新
 
 - Release run の `verify`・`publish` が成功している。
 - Release が公開済みかつ Immutable で、`pr-merge-readiness-action.tar.gz` を含んでいる。
-- タグ内の `dist/` が上記5ファイルだけで、タグの40桁 SHA が公開 Summary と一致する。
+- タグ内の `dist/` が上記3ファイルだけで、タグの40桁 SHA が公開 Summary と一致する。
 
 ```sh
 gh release view "$PMR_VERSION" --repo "$PMR_REPO" --json url,tagName,isDraft,isImmutable,assets,body
@@ -118,7 +117,7 @@ git merge-base --is-ancestor "$PMR_VERSION^{commit}" origin/main
 | Draft がある | 検証済みタグの配布物と既存 asset を照合し、不足する asset を添付して Draft を公開する |
 | Release 公開済み | 公開後の確認を行う。不具合は新しいバージョンで修正する |
 
-Draft の復旧では元の `verify` 成功を確認し、タグ内の5ファイルから tar.gz を作成します。再ビルド、別コミットの配布物への差し替え、公開済み asset の上書きや削除は行いません。
+Draft の復旧では元の `verify` 成功を確認し、タグ内の3ファイルから tar.gz を作成します。再ビルド、別コミットの配布物への差し替え、公開済み asset の上書きや削除は行いません。
 
 ## 公開記録
 
@@ -134,6 +133,4 @@ Draft の復旧では元の `verify` 成功を確認し、タグ内の5ファイ
 
 ## CLI
 
-Node.js 24 の環境で、配布用コミットを checkout して `node dist/cli.js validate-config --config <path>` を実行できます。Release asset の展開先で `node cli.js validate-config --config <path>` を使うこともできます。依存インストールは不要です。開発ソースでは `npm ci` の後に `npm run validate-config -- --config <path>` を使います。
-
-PR の観測・ラベル更新は GitHub workflow から40桁 SHA に固定した remote Action を呼び出してください。local Action（`uses: ./path`）は非対応です。
+設定検証 CLI は廃止しました。`with` 入力の検証は Action の実行時に行います。

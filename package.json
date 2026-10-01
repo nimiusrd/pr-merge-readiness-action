@@ -17,11 +17,7 @@
     "check:workflows": "tsx scripts/check-workflows.ts",
     "build": "tsx scripts/build.ts",
     "test:bundle": "PMR_TEST_BUNDLE=build/dist/index.js node --import tsx --test tests/bundle.test.ts",
-    "validate-config": "tsx src/cli.ts validate-config",
     "check:dist": "tsx scripts/check-dist.ts"
-  },
-  "dependencies": {
-    "smol-toml": "1.9.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

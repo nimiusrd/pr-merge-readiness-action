@@ -1,4 +1,0 @@
-version = 4
-
-[review]
-stale_change_review_days = 30

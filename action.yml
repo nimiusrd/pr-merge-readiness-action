@@ -2,17 +2,15 @@ name: PR Merge Readiness
 description: PR の変更履歴に基づく追加確認を判定し、ラベルと実行サマリーを更新します。
 author: nimiusrd
 inputs:
-  config-path:
-    description: default branch 上の設定ファイル
-    default: .github/pr-merge-readiness.toml
+  stale-change-review-days:
+    description: 既存ファイルの最終変更から追加の人間レビューを要求する閾値日数（正の整数）
+    default: '30'
   token:
     description: contents の read、pull-requests・issues の write 権限を持つ token
     default: ${{ github.token }}
 outputs:
   operation:
-    description: イベントから選択した処理（observe、validate-config、skip）
-  config-sha:
-    description: 使用した設定コミット
+    description: イベントから選択した処理（observe、skip）
 runs:
   using: node24
   main: dist/index.js

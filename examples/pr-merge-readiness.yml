@@ -10,8 +10,6 @@ on:
         description: PR 番号（空欄なら全 open PR と終了済み PR のラベルを同期）
         type: string
         default: ''
-  push:
-    paths: [.github/pr-merge-readiness.toml, .github/workflows/pr-merge-readiness.yml]
 
 permissions: {}
 
@@ -28,4 +26,6 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: nimiusrd/pr-merge-readiness-action@fc422aad51c2a719cc7b625afb5e3939b4f52868 # v0.7.0
+      - uses: nimiusrd/pr-merge-readiness-action@<RELEASE_COMMIT_SHA>
+        with:
+          stale-change-review-days: '30'

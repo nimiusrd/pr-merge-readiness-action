@@ -22,8 +22,6 @@ export const HEAD = "a".repeat(40),
   ACTION_SHA = "d".repeat(40);
 export const AT = "2026-09-11T12:00:00.000000Z";
 export const policy: Policy = { stale_change_review_days: 30 };
-export const configText =
-  "version = 4\n[review]\nstale_change_review_days = 30\n";
 export function approval(overrides: Partial<Review> = {}): Review {
   return {
     id: 1,
@@ -143,8 +141,6 @@ export class FixtureReader implements Reader {
   ];
   lastChanged = "2026-09-01T12:00:00Z";
   commits: unknown;
-  proposal = configText;
-  settings = configText;
   openNumbers = [1];
   async request(path: string): Promise<unknown> {
     this.requests.push(path);
@@ -160,16 +156,6 @@ export class FixtureReader implements Reader {
           },
         ]
       );
-    if (path === this.prefix) return { default_branch: "trunk" };
-    if (path.includes("/git/ref/heads/")) return { object: { sha: BASE } };
-    if (path.includes("/contents/"))
-      return {
-        type: "file",
-        encoding: "base64",
-        content: Buffer.from(
-          path.endsWith(`?ref=${HEAD}`) ? this.proposal : this.settings,
-        ).toString("base64"),
-      };
     throw new Error(`unexpected request ${path}`);
   }
   async graphql(number: number): Promise<JsonObject> {

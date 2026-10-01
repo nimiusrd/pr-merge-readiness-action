@@ -183,7 +183,7 @@ test("レビューの順序だけは無視し、作者種別・承認取消は�
   }
 });
 for (const timing of ["before", "during"])
-  test(`提案検証済み head が変われば観測自体を中断: ${timing}`, async () => {
+  test(`イベントの head が変われば観測自体を中断: ${timing}`, async () => {
     const api = new FixtureReader();
     if (timing === "before") api.state.headRefOid = OLD;
     else api.drift.headRefOid = OLD;
