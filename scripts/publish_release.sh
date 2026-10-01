@@ -7,14 +7,17 @@ artifacts_dir="$(mktemp -d)"
 trap 'rm -rf "$artifacts_dir"' EXIT
 
 notes="$artifacts_dir/notes.md"
+run_url="${GITHUB_SERVER_URL:-https://github.com}/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+# 素の SHA は Job Summary 上で短縮される。40桁はコード表記で残す。ブランチ名は書かない。
 cat > "$notes" <<EOF
 リリース: $RELEASE_VERSION
-配布用コミット: $release_sha
-配布ブランチ: main
-検証 run: ${GITHUB_SERVER_URL:-https://github.com}/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+配布用コミット: \`$release_sha\`
+検証 run: $run_url
+
+固定参照: \`$GITHUB_REPOSITORY@$release_sha\`
 
 Node.js 24 で実行する TypeScript 製 Action の JavaScript バンドルです。
-利用側の uses を配布用コミット $release_sha に固定してください。
+利用側の uses を固定参照に合わせてください。
 閾値は with.stale-change-review-days で指定します。docs/workflow.md に従って workflow を移行してください。
 利用側で Node.js のセットアップ・依存インストール・ビルドは行いません。
 EOF

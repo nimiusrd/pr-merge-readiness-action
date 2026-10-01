@@ -89,7 +89,7 @@ gh run watch "$PMR_RELEASE_RUN_ID" --repo "$PMR_REPO" --exit-status
 
 `verify` はタグ形式、リモートタグのコミット、main 履歴に含まれること、配布物の構成と checksum を確認します。その後ソースのテスト・静的検査と、タグ内の `dist/index.js` のバンドルテストを実行します。Release workflow は再ビルドしません。
 
-`publish` は同じタグと配布物を再確認し、タグ内の3ファイルを tar.gz にまとめて公開します。main・タグ・配布物のコミットを変更しません。公開成功後の Summary にバージョン・配布用 SHA・Release run URL を記載します。タグ対象は main の先端でなくても履歴に含まれていれば公開できます。
+`publish` は同じタグと配布物を再確認し、タグ内の3ファイルを tar.gz にまとめて公開します。main・タグ・配布物のコミットを変更しません。公開成功後の Summary にはバージョン、コード表記の40桁配布用 SHA、Release run URL、`owner/name@<40桁SHA>` の固定参照を記載します。SHA を素の文で書くと表示が短縮されるため、コード表記にします。配布ブランチは書きません。タグ対象は main の先端でなくても履歴に含まれていれば公開できます。
 
 ## 公開後の確認と参照更新
 
