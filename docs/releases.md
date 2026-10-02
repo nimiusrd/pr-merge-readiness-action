@@ -1,26 +1,225 @@
 # リリース手順
 
-公開担当者は、**配布準備 PR を手動作成 → main にマージ → タグを push → 公開確認 → 参照更新 PR**の順に進めます。Release workflow の手動実行や配布準備 PR の自動作成は行いません。
+公開担当者は、main CI の配布物を採用し、配布準備 PR を手動で作成します。PR を main にマージした後、そのコミットにタグを付けて push すると Release workflow が公開します。
 
-正本は [CI](../.github/workflows/ci.yml)、[Release workflow](../.github/workflows/release.yml)、[タグ・配布物の検証](../scripts/validate_release.sh)、[公開スクリプト](../scripts/publish_release.sh)です。
+| 工程                              | 完了条件                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------ |
+| 1. ソースと CI を選ぶ             | 公開するソースの main CI 全体が成功している                              |
+| 2. 配布準備 PR を作成・マージする | 検証済み artifact を `dist/` に配置し、PR の CI とレビューが完了している |
+| 3. タグを push する               | マージ後の main CI が成功し、ソースと配布物の対応を確認している          |
+| 4. 公開を確認する                 | タグの SHA・公開済み Immutable Release・asset が一致している             |
+| 5. 参照更新 PR を作る             | 導入例と運用 workflow を公開済みの40桁 SHA に固定している                |
 
-## 配布物と実行環境
+正本は [CI](../.github/workflows/ci.yml)、[Release workflow](../.github/workflows/release.yml)、[タグ・配布物の検証](../scripts/validate_release.sh)、[公開スクリプト](../scripts/publish_release.sh)です。Release workflow の手動実行や配布準備 PR の自動作成は行いません。過去の公開記録は[リリース履歴](release-history.md)を参照してください。
 
-TypeScript を esbuild で依存ごと JavaScript にバンドルします。実行時は GitHub Actions runner の Node.js 24 を使用します。利用側での checkout、Node.js のセットアップ、依存解決、ビルド、asset のダウンロードは不要です。OS・CPU ごとの実行ファイルは配布しません。Node.js 24 対応 runner を使用してください。
+## 開始前に確認すること
 
-タグ内の `dist/` は次の3ファイルだけです。全て通常のファイルとし、symlink を許可しません。
+- 公開するソース変更が main にマージされている。
+- 作業ツリーに未コミットの変更がない。Git・GitHub CLI はホスト、npm・配布ファイルの操作は Node.js 24 の Dev Container で実行する。
+- タグと Release（Draft を含む）の両方で未使用の `vMAJOR.MINOR.PATCH` を決めている。先頭ゼロ、prerelease、build metadata は使用できない。ルートの `package.json` の version はタグとは独立している。
+- リポジトリで Immutable Releases が有効になっている。公開 job の `GITHUB_TOKEN` には `contents: write` が必要。
 
-| ファイル | 用途 |
-| --- | --- |
-| `index.js` | `action.yml` が指定する Action の実行入口 |
-| `package.json` | バンドル自身の ES module 宣言 |
-| `SHA256SUMS` | 上記2ファイルの SHA-256 |
+手順全体で次の2つの SHA を区別します。**利用側の `uses:` に固定するのは配布用 SHA です。**
 
-Release asset は `pr-merge-readiness-action.tar.gz` です。ソースと依存の正本は `.node-version`・ルートの `package.json`・`package-lock.json` です。閾値は `with.stale-change-review-days` に指定し、設定ファイルは使用しません。
+| 変数              | 指すコミット                             | 用途                                     |
+| ----------------- | ---------------------------------------- | ---------------------------------------- |
+| `PMR_SOURCE_SHA`  | artifact を生成した main CI の `headSha` | ビルド元を記録し、配布準備ブランチを作る |
+| `PMR_RELEASE_SHA` | 配布準備 PR を main にマージしたコミット | タグを付け、利用側の `uses:` に固定する  |
 
-## 開発時の検証
+以下のコマンドはリポジトリのルートで、同じシェルから順に実行します。バージョン、SHA、run ID の例は実際の値に置き換えてください。コマンドが失敗したり確認結果が一致しなかったりした場合は、原因を解消してから次に進みます。
 
-[開発チェック](../README.md#開発)の後、次を実行します。
+## 1. ソースと main CI を選ぶ
+
+```sh
+PMR_REPO=nimiusrd/pr-merge-readiness-action
+PMR_VERSION=v0.8.0  # 例。実際に公開する未使用のバージョンを指定する。
+PMR_SOURCE_SHA='CIで検証した40桁SHAに置き換える'
+
+git status --short
+git fetch origin main
+git merge-base --is-ancestor "$PMR_SOURCE_SHA" origin/main
+gh run list --repo "$PMR_REPO" --workflow ci.yml --branch main --event push \
+  --commit "$PMR_SOURCE_SHA" --limit 10
+PMR_RUN_ID=123456789
+gh run view "$PMR_RUN_ID" --repo "$PMR_REPO" \
+  --json url,workflowName,headBranch,headSha,event,status,conclusion,jobs
+```
+
+選んだ run が以下を全て満たすことを確認します。
+
+- `workflowName` が `CI`、`headBranch` が `main`、`event` が `push`。
+- `headSha` が `PMR_SOURCE_SHA` と一致する。
+- `status` が `completed`、`conclusion` が `success` で、`test`・`bundle` の両 job が成功している。
+- `action-bundle` artifact をダウンロードできる。保存期間は7日間。
+
+PR の CI artifact は配布に使いません。artifact が期限切れなら、同じソース SHA の main CI を再実行するか、新しい main CI を選び直します。ローカルビルドで代用しません。
+
+## 2. 配布準備 PR を作成・マージする
+
+### artifact を配置・検証する
+
+ソース SHA からブランチを作り、未使用のディレクトリに artifact をダウンロードします。PR 本文や証跡は配布ファイル用のディレクトリの外に保存します。
+
+```sh
+PMR_PREP_DIR="evidence/release-$PMR_VERSION-$PMR_RUN_ID"
+PMR_BUNDLE_DIR="$PMR_PREP_DIR/action-bundle"
+devcontainer exec --workspace-folder . test ! -e "$PMR_PREP_DIR"
+git switch -c "codex/prepare-$PMR_VERSION" "$PMR_SOURCE_SHA"
+gh run download "$PMR_RUN_ID" --repo "$PMR_REPO" \
+  --name action-bundle --dir "$PMR_BUNDLE_DIR"
+
+devcontainer exec --workspace-folder . npm ci
+devcontainer exec --workspace-folder . npm run check:dist -- "$PMR_BUNDLE_DIR"
+devcontainer exec --workspace-folder . --remote-env "PMR_BUNDLE_DIR=$PMR_BUNDLE_DIR" bash -euo pipefail -c '
+mkdir -p dist
+for file in index.js package.json SHA256SUMS; do
+  install -m 644 "$PMR_BUNDLE_DIR/$file" "dist/$file"
+done
+'
+devcontainer exec --workspace-folder . npm run check:dist
+devcontainer exec --workspace-folder . env PMR_TEST_BUNDLE=dist/index.js \
+  node --import tsx --test tests/bundle.test.ts
+git add -f dist/index.js dist/package.json dist/SHA256SUMS
+git add -u -- dist/
+git diff --cached --stat
+git diff --cached --name-status
+```
+
+`dist/` は後述の3ファイルだけにします。余分なファイルがあれば内容を確認して除去し、構成・checksum・バンドルテストを再確認してください。バンドルテストは `node_modules` のない一時ディレクトリで、入力検証と HTTP による Action 実行を確認します。
+
+### PR を提出する
+
+提出前に[開発チェック](../README.md#開発)を実行し、ステージした差分が配布物だけであることを確認します。以下の本文例の値を置き換え、その版の変更要約と検証結果を追記して、`$PMR_PREP_DIR/pr.md` に保存してください。
+
+```markdown
+## 概要
+
+<バージョン> の配布物を main CI artifact から配置する。
+ソース SHA: <PMR_SOURCE_SHA>
+CI run: <main CI run URL>
+
+## 検証
+
+main の push CI で test・bundle の成功を確認。
+ダウンロード後と配置後の構成・checksum、および同梱バンドルのテストを確認。
+```
+
+```sh
+git commit -m "$PMR_VERSION の配布物を準備する"
+git push -u origin "codex/prepare-$PMR_VERSION"
+gh pr create --repo "$PMR_REPO" --base main --head "codex/prepare-$PMR_VERSION" \
+  --title "$PMR_VERSION の配布準備" --body-file "$PMR_PREP_DIR/pr.md"
+```
+
+ソース変更は混ぜません。PR の CI `test`・`bundle` とレビューが完了してから、手動で main にマージします。CI `bundle` は、追跡済み `dist/` の checksum と同梱バンドルを検証した後、別の `build/dist/` に開発用バンドルを生成します。
+
+## 3. マージ後の CI を確認し、タグを push する
+
+配布準備 PR をマージしたコミットを指定し、そのコミットに対する main の push CI を確認します。PR の CI 成功だけでは、この工程の完了になりません。
+
+```sh
+PMR_RELEASE_SHA='配布準備PRをマージした40桁SHAに置き換える'
+git fetch origin main
+git merge-base --is-ancestor "$PMR_SOURCE_SHA" "$PMR_RELEASE_SHA"
+git merge-base --is-ancestor "$PMR_RELEASE_SHA" origin/main
+git diff --name-status "$PMR_SOURCE_SHA" "$PMR_RELEASE_SHA" -- . ':(exclude)dist/**'
+
+gh run list --repo "$PMR_REPO" --workflow ci.yml --branch main --event push \
+  --commit "$PMR_RELEASE_SHA" --limit 5
+PMR_MERGE_RUN_ID=123456790
+gh run view "$PMR_MERGE_RUN_ID" --repo "$PMR_REPO" \
+  --json url,workflowName,headBranch,headSha,event,status,conclusion,jobs
+```
+
+工程1と同じ条件で CI 全体の成功を確認し、`headSha` が `PMR_RELEASE_SHA` と一致することを確かめます。差分もレビューし、**artifact のソース SHA からタグ対象コミットまでに、製品ソース・依存・ビルド設定が変わっていたら、変更後の main CI artifact で配布準備をやり直します。** checksum とバンドルテストだけでは、ソースとの完全な対応を証明できません。
+
+確認後、タグを作成して push します。タグ対象は main の先端でなくても、履歴に含まれていれば公開できます。
+
+```sh
+git tag -a "$PMR_VERSION" "$PMR_RELEASE_SHA" -m "$PMR_VERSION"
+git push origin "refs/tags/$PMR_VERSION"
+gh run list --repo "$PMR_REPO" --workflow release.yml --event push --limit 5
+# タグ・対象コミット・開始時刻を照合して run ID を指定する。
+PMR_RELEASE_RUN_ID=123456791
+gh run view "$PMR_RELEASE_RUN_ID" --repo "$PMR_REPO" \
+  --json url,headBranch,headSha,event,startedAt
+gh run watch "$PMR_RELEASE_RUN_ID" --repo "$PMR_REPO" --exit-status
+```
+
+Release workflow の役割は次のとおりです。再ビルドや main・タグ・配布物のコミット更新は行いません。
+
+| job       | 処理                                                                                                                                                                                 |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `verify`  | タグ形式、リモートタグとイベントのコミット、main の履歴、配布物の構成・checksum を確認し、ソースのテスト・静的検査とタグ内バンドルのテストを実行する                                 |
+| `publish` | 同じタグ・配布物を再確認し、タグ内の3ファイルを tar.gz にまとめて Release を公開する。成功後の Summary にバージョン・コード表記の40桁配布用 SHA・Release run URL・固定参照を記載する |
+
+Release 本文と Summary の配布用 SHA と `owner/name@<40桁SHA>` の固定参照は、コード表記で40桁を表示します。SHA を素の文で書くと表示が短縮されるためです。配布ブランチは記載しません。
+
+## 4. 公開結果を確認する
+
+```sh
+gh release view "$PMR_VERSION" --repo "$PMR_REPO" \
+  --json url,tagName,isDraft,isImmutable,assets,body
+git fetch origin main "refs/tags/$PMR_VERSION:refs/tags/$PMR_VERSION"
+git rev-parse "$PMR_VERSION^{commit}"
+git merge-base --is-ancestor "$PMR_VERSION^{commit}" origin/main
+git ls-tree -r "$PMR_VERSION^{commit}" dist/
+```
+
+- 通常公開では Release run の `verify`・`publish` が成功している。手動復旧時は元の `verify` 成功を確認し、復旧内容と検証結果を記録する。
+- `tagName` が `PMR_VERSION`、`isDraft` が `false`、`isImmutable` が `true` で、asset に `pr-merge-readiness-action.tar.gz` がある。
+- タグが指す40桁のコミット SHA が `PMR_RELEASE_SHA`、Release 本文、公開 Summary（手動復旧時は復旧記録）と一致する。注釈付きタグ自身の SHA ではなく、`^{commit}` で得る SHA を使う。
+- タグ内の `dist/` が3ファイルだけで、全て Git mode `100644` になっている。
+
+## 5. 参照更新 PR と公開記録を作る
+
+公開確認後、最新の main から別の PR を作り、以下の SHA・バージョンコメントを同じ配布用 SHA に更新します。
+
+- `README.md` の公開版の案内と導入例
+- `examples/pr-merge-readiness.yml`
+- `.github/workflows/pr-merge-readiness.yml`
+
+TypeScript 版の初回公開では、README の Python 版・未公開の案内も更新し、運用 workflow を[移行手順](workflow.md)に従って切り替えます。配布準備前の実装コミットは `dist/index.js` が未配置のため、利用側の `uses:` に指定しません。公開済みの Python 版タグは保持します。
+
+[リリース履歴](release-history.md)には、バージョン・変更要約・配布準備 PR・main CI run URL とソース SHA・マージ後の CI run URL・Release run URL と配布用 SHA・検証要約を記載します。実測 JSON・API 応答・ログは Git 管理せず、`evidence/` または Actions artifacts に保存します。
+
+## 失敗時の対応
+
+まず run のログ、リモートタグ、Release の状態を確認します。通信・認証エラーだけで Release 未作成と判断しません。
+
+```sh
+gh run view "$PMR_RELEASE_RUN_ID" --repo "$PMR_REPO" --log-failed
+git ls-remote origin "refs/tags/$PMR_VERSION" "refs/tags/$PMR_VERSION^{}"
+gh release view "$PMR_VERSION" --repo "$PMR_REPO" \
+  --json url,tagName,isDraft,isImmutable,assets,body
+```
+
+| 状態                                                 | 対応                                                                                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| タグ・配布物・ソースの検証で失敗                     | 修正した配布準備 PR をマージし、新しいバージョンで公開する。既存タグは移動しない                                                |
+| 一時的な通信障害で、Release が存在しないと確認できた | リモートタグのコミット SHA が同じことを確認し、元の run を再実行する                                                            |
+| Draft がある                                         | 元の `verify` 成功とタグの SHA を確認し、タグ内の配布物と既存 asset を照合する。不足する asset を添付し、Draft を手動で公開する |
+| Release が公開済み                                   | 工程4の確認を行う。不具合は新しいバージョンで修正する                                                                           |
+
+公開スクリプトは常に `gh release create` を実行するため、既存 Draft や公開済み Release がある状態では再実行で復旧できません。[GitHub CLI は asset を伴う作成時に Draft 作成・asset 添付・公開を順に行う](https://cli.github.com/manual/gh_release_create)ため、その途中で失敗すると Draft が残ることがあります。
+
+手動復旧や、公開済みなのに job が失敗した場合は、元の `publish` 成功や Summary を完了条件にしません。元の `verify` 成功と工程4のタグ・Release・asset を確認し、復旧記録に Release URL・元の run URL・配布用 SHA・対応内容・検証要約を残します。
+
+Draft の復旧用 tar.gz は、検証済みタグ内の3ファイルから作ります。既存 asset は展開したファイルと `SHA256SUMS` を照合してください。tar のメタデータ等で archive 自体の checksum は変わる場合があります。再ビルド、別コミットの配布物への差し替え、公開済み asset の上書き・削除は行いません。[Immutable Release のタグと asset は公開後に変更できません。](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+
+## 配布物と開発時の検証
+
+TypeScript を esbuild で依存ごと JavaScript にバンドルします。`action.yml` は `runs.using: node24` で `dist/index.js` を起動します。利用側は Node.js 24 対応 runner を使い、checkout、Node.js のセットアップ、依存解決、ビルド、asset のダウンロードは不要です。OS・CPU ごとの実行ファイルは配布しません。
+
+| タグ内のファイル    | 用途                          |
+| ------------------- | ----------------------------- |
+| `dist/index.js`     | Action の実行入口             |
+| `dist/package.json` | バンドル自身の ES module 宣言 |
+| `dist/SHA256SUMS`   | 上記2ファイルの SHA-256       |
+
+全て通常のファイルとし、symlink は許可しません。Release asset はこの3ファイルを梱包した `pr-merge-readiness-action.tar.gz` です。ソースと依存の正本は `.node-version`・ルートの `package.json`・`package-lock.json` です。
+
+開発時は[開発チェック](../README.md#開発)に続けて、次を実行します。
 
 ```sh
 devcontainer exec --workspace-folder . npm run build
@@ -28,109 +227,4 @@ devcontainer exec --workspace-folder . npm run check:dist -- build/dist
 devcontainer exec --workspace-folder . npm run test:bundle
 ```
 
-出力先は Git 管理外の `build/dist/` です。追跡済み `dist/` はローカルビルドで更新しません。バンドルテストは `node_modules` のない一時ディレクトリに配布ファイルだけを配置し、入力検証と HTTP による Action 実行を確認します。
-
-## 配布準備 PR を手動で作成する
-
-1. 公開するソースを main にマージし、そのコミットの CI `test`・`bundle` が成功するのを待ちます。main の push CI は検証済み `action-bundle` artifact を7日間保存します。PR の CI artifact は配布に使いません。
-2. 未使用の `vMAJOR.MINOR.PATCH` を決めます。先頭ゼロ、prerelease、build metadata は受け付けません。`package.json` の version はタグとは独立しています。
-3. CI run URL・ソース SHA を記録し、そのソースコミットから配布準備ブランチを作ります。以下の値は実際の値に置き換えます。Git と `gh` はホストで実行します。
-
-```sh
-PMR_REPO=nimiusrd/pr-merge-readiness-action
-PMR_VERSION=v0.8.0  # 例。実際に公開する未使用のバージョンを指定する。
-PMR_SOURCE_SHA='CIで検証した40桁SHAに置き換える'
-PMR_RUN_ID=123456789
-PMR_PREP_DIR="evidence/release-$PMR_VERSION-$PMR_RUN_ID"
-gh run view "$PMR_RUN_ID" --repo "$PMR_REPO" --json url,headSha,event,conclusion
-# headSha が PMR_SOURCE_SHA、event が push、CI 全体が成功であることを確認する。
-git fetch origin main
-git switch -c "codex/prepare-$PMR_VERSION" "$PMR_SOURCE_SHA"
-gh run download "$PMR_RUN_ID" --repo "$PMR_REPO" --name action-bundle --dir "$PMR_PREP_DIR"
-```
-
-4. ダウンロード先は既存ファイルを含まないディレクトリを使います。artifact の構成と checksum を確認し、そのまま `dist/` に配置します。
-
-```sh
-devcontainer exec --workspace-folder . npm run check:dist -- "$PMR_PREP_DIR"
-devcontainer exec --workspace-folder . --remote-env "PMR_PREP_DIR=$PMR_PREP_DIR" bash -euo pipefail -c '
-mkdir -p dist
-for file in index.js package.json SHA256SUMS; do
-  install -m 644 "$PMR_PREP_DIR/$file" "dist/$file"
-done
-'
-git rm --ignore-unmatch dist/cli.js dist/THIRD_PARTY_LICENSES.txt
-git add -f dist/index.js dist/package.json dist/SHA256SUMS
-```
-
-5. バージョン・CI run URL・ソース SHA・変更と検証の要約を記載して、手動で配布準備 PR を作ります。ソース変更は混ぜません。CI `bundle` は配布物がある場合、ローカルでのビルドより先に checksum と同梱バンドルのテストを実行します。CI 成功後に main にマージします。
-
-**artifact のソース SHA からタグ対象コミットまでに、製品ソース・依存 lock・ビルド設定の変更がないことをレビューで確認してください。** 変更や artifact の期限切れがあれば、新しい main CI artifact で準備し直します。checksum とバンドルテストだけではソースとの完全な対応を証明できません。
-
-### TypeScript 版の初回配布
-
-移植の実装コミットには旧 `dist/linux-*` の削除だけを含め、新しいローカル生成物は含めません。この段階の `action.yml` が参照する `dist/index.js` は未配置です。実装コミットを利用側の `uses:` に指定せず、main CI artifact の配布準備と公開を完了してから利用してください。公開済みの Python 版タグ・運用 workflow の参照 SHA はそのまま保持します。
-
-## タグを push して公開する
-
-配布準備 PR のマージ後の CI 成功、Immutable Releases の有効化、公開 job の `GITHUB_TOKEN` の `contents: write` 権限を確認します。
-
-```sh
-PMR_RELEASE_SHA='配布準備PRをマージした40桁SHAに置き換える'
-git fetch origin main
-git merge-base --is-ancestor "$PMR_RELEASE_SHA" origin/main
-git tag -a "$PMR_VERSION" "$PMR_RELEASE_SHA" -m "$PMR_VERSION"
-git push origin "refs/tags/$PMR_VERSION"
-gh run list --repo "$PMR_REPO" --workflow release.yml --event push --limit 5
-# タグ・対象コミット・開始時刻を照合して run ID を指定する。
-PMR_RELEASE_RUN_ID=123456790
-gh run watch "$PMR_RELEASE_RUN_ID" --repo "$PMR_REPO" --exit-status
-```
-
-`verify` はタグ形式、リモートタグのコミット、main 履歴に含まれること、配布物の構成と checksum を確認します。その後ソースのテスト・静的検査と、タグ内の `dist/index.js` のバンドルテストを実行します。Release workflow は再ビルドしません。
-
-`publish` は同じタグと配布物を再確認し、タグ内の3ファイルを tar.gz にまとめて公開します。main・タグ・配布物のコミットを変更しません。公開成功後の Summary にはバージョン、コード表記の40桁配布用 SHA、Release run URL、`owner/name@<40桁SHA>` の固定参照を記載します。SHA を素の文で書くと表示が短縮されるため、コード表記にします。配布ブランチは書きません。タグ対象は main の先端でなくても履歴に含まれていれば公開できます。
-
-## 公開後の確認と参照更新
-
-- Release run の `verify`・`publish` が成功している。
-- Release が公開済みかつ Immutable で、`pr-merge-readiness-action.tar.gz` を含んでいる。
-- タグ内の `dist/` が上記3ファイルだけで、タグの40桁 SHA が公開 Summary と一致する。
-
-```sh
-gh release view "$PMR_VERSION" --repo "$PMR_REPO" --json url,tagName,isDraft,isImmutable,assets,body
-git fetch origin main "refs/tags/$PMR_VERSION:refs/tags/$PMR_VERSION"
-git rev-parse "$PMR_VERSION^{commit}"
-git merge-base --is-ancestor "$PMR_VERSION^{commit}" origin/main
-```
-
-確認後、`README.md` の公開版の案内と導入例、`examples/pr-merge-readiness.yml`、`.github/workflows/pr-merge-readiness.yml` の SHA・バージョンコメントを同じ配布用 SHA に更新します。初回は README の Python 版・未公開の案内も更新します。公開記録には配布準備 PR・main CI run URL とソース SHA・Release run URL と配布用 SHA・検証要約を記載します。実測 JSON・API 応答・ログは Git 管理せず `evidence/` または Actions artifacts に保存します。
-
-## 失敗時の対応
-
-最初に run のログとリモートタグ・Release を確認します。通信・認証エラーだけで Release 未作成と判断しません。
-
-| 状態 | 対応 |
-| --- | --- |
-| タグ・配布物・検証で失敗 | 修正した配布準備 PR をマージし、新しいバージョンで公開する。既存タグは移動しない |
-| 一時的な通信障害で Release 未作成 | タグの SHA が同じことを確認して元の run を再実行する |
-| Draft がある | 検証済みタグの配布物と既存 asset を照合し、不足する asset を添付して Draft を公開する |
-| Release 公開済み | 公開後の確認を行う。不具合は新しいバージョンで修正する |
-
-Draft の復旧では元の `verify` 成功を確認し、タグ内の3ファイルから tar.gz を作成します。再ビルド、別コミットの配布物への差し替え、公開済み asset の上書きや削除は行いません。
-
-## 公開記録
-
-新しいリリース用の配布ブランチは作りません。既存 v0.4.0 は旧方式で公開したため、タグと `codex/releases/v0.4.0` は配布用 SHA `107e80a91574e277ea3c13e41aeff7710cae77e2` を指したまま保持します。過去のタグ・コミットは書き換えず、v0.5.0〜v0.7.0 は旧 Release workflow が main に配布物をコミットしてタグを作成しました。今後は手動の配布準備 PR とタグ push で公開します。
-
-[v0.5.0 の Release run](https://github.com/nimiusrd/pr-merge-readiness-action/actions/runs/34994639892)では、ソース `e6d305d05cce80eae0411cfb33845b4aef8a6e58` のテスト・静的検査・両 CPU のバイナリ検証が成功し、配布用コミット `4790eda7e56840c18a98a1d4c135ab03c119b5f2` を main とタグに公開しました。`labels = "auto"` に対応する最初のリリースです。
-
-[v0.5.1 の Release run](https://github.com/nimiusrd/pr-merge-readiness-action/actions/runs/35000713461)では、ソース `2fdf61530ceec44a788cd13b9a0c00ef22cbbe2a` のテスト・静的検査・両 CPU のバイナリ検証が成功し、配布用コミット `38abf77191ca0801d10dd6bd8c9d387bdad4b911` を main とタグに公開しました。Immutable Release として公開済みで、TOML の `action_ref` と Action SHA の一致制約を削除しています。
-
-[v0.6.0 の Release run](https://github.com/nimiusrd/pr-merge-readiness-action/actions/runs/35113264395)では、ソース `001c3be5f3c8e43009033331eaac03f6f15c5683` のテスト・静的検査・両 CPU のバイナリ検証が成功し、配布用コミット `568c7441e16afa46db11bc84f1e4708e6525a404` を公開しました。設定 version 3 と単一実行への簡素化、更新時刻だけの変化による観測失敗の修正を含みます。
-
-[v0.7.0 の Release run](https://github.com/nimiusrd/pr-merge-readiness-action/actions/runs/35344205607)では、ソース `55b6a9488b8928bd89d0279198b14c2322ca9dcf` のテスト・静的検査・両 CPU のバイナリ検証が成功し、配布用コミット `fc422aad51c2a719cc7b625afb5e3939b4f52868` を公開しました。設定 version 4 に対応し、GitHub Ruleset と重複する判定を削除しています。設定と参照 SHA を同時に移行してください。
-
-## CLI
-
-設定検証 CLI は廃止しました。`with` 入力の検証は Action の実行時に行います。
+出力先は Git 管理外の `build/dist/` です。実装 PR にはローカル生成物を含めず、追跡済み `dist/` は main CI artifact を使う配布準備 PR で更新します。設定は workflow の `with` に指定し、設定ファイル・設定検証 CLI は提供しません。
