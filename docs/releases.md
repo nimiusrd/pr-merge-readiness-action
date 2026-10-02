@@ -10,7 +10,7 @@
 | 4. 公開を確認する                 | タグの SHA・公開済み Immutable Release・asset が一致している             |
 | 5. 参照更新 PR を作る             | 導入例と運用 workflow を公開済みの40桁 SHA に固定している                |
 
-正本は [CI](../.github/workflows/ci.yml)、[Release workflow](../.github/workflows/release.yml)、[タグ・配布物の検証](../scripts/validate_release.sh)、[公開スクリプト](../scripts/publish_release.sh)です。Release workflow の手動実行や配布準備 PR の自動作成は行いません。過去の公開記録は[リリース履歴](release-history.md)を参照してください。
+正本は [CI](../.github/workflows/ci.yml)、[Release workflow](../.github/workflows/release.yml)、[タグ・配布物の検証](../scripts/validate_release.sh)、[公開スクリプト](../scripts/publish_release.sh)です。Release workflow の手動実行や配布準備 PR の自動作成は行いません。
 
 ## 開始前に確認すること
 
@@ -179,9 +179,7 @@ git ls-tree -r "$PMR_VERSION^{commit}" dist/
 - `examples/pr-merge-readiness.yml`
 - `.github/workflows/pr-merge-readiness.yml`
 
-TypeScript 版の初回公開では、README の Python 版・未公開の案内も更新し、運用 workflow を[移行手順](workflow.md)に従って切り替えます。配布準備前の実装コミットは `dist/index.js` が未配置のため、利用側の `uses:` に指定しません。公開済みの Python 版タグは保持します。
-
-[リリース履歴](release-history.md)には、バージョン・変更要約・配布準備 PR・main CI run URL とソース SHA・マージ後の CI run URL・Release run URL と配布用 SHA・検証要約を記載します。実測 JSON・API 応答・ログは Git 管理せず、`evidence/` または Actions artifacts に保存します。
+参照更新 PR の本文には、バージョン・変更要約・配布準備 PR・main CI run URL とソース SHA・マージ後の CI run URL・Release run URL と配布用 SHA・検証要約を記載します。実測 JSON・API 応答・ログは Git 管理せず、`evidence/` または Actions artifacts に保存します。
 
 ## 失敗時の対応
 
