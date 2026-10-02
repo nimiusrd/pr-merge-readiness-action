@@ -82,7 +82,7 @@
 | `enforcement` | 調整済みのルールを適用するときに `active` にする |
 | `conditions.ref_name` | default branch 以外も保護する場合に対象を調整する |
 
-CI の `integration_id` は特定の環境に固定しないため省略しています。必要なら取り込み先で CI の発行元アプリも指定します。bypass は空です。本リポジトリの配布物も手動の配布準備 PR を経由して main に反映します。
+CI の `integration_id` は特定の環境に固定しないため省略しています。必要なら取り込み先で CI の発行元アプリも指定します。bypass は空です。本リポジトリの配布物も、Cursor Automation が開き人がマージする配布準備 PR を経由して main に反映します。
 
 GitHub のリポジトリ設定から Rulesets を開き、New ruleset のメニューで Import a ruleset を選んで JSON を読み込み、内容を調整して作成します。[公式のインポート手順](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/managing-rulesets-for-a-repository#importing-a-ruleset)と[各フィールドの定義](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)を参照してください。
 
@@ -100,6 +100,6 @@ CODEOWNERS は base branch に配置し、利用先で書き込み権限を持�
 
 bypass を設ける場合は対象者・用途を限定し、通常の変更が上記のルールを通るように運用します。この Action は Ruleset の作成・変更・適用状況の監査を行いません。この文書も利用先や本リポジトリの設定を変更するものではありません。
 
-本リポジトリは、検証済み JavaScript バンドルを手動の配布準備 PR で main に反映し、そのマージ済みコミットへのタグ push で公開します。Release workflow は main・タグを更新しないため、公開用の branch ruleset bypass は不要です。タグの作成権限は公開担当者に合わせて設定します。詳細は[リリース手順](releases.md)を参照してください。
+本リポジトリは、検証済み JavaScript バンドルを Cursor Automation が開く配布準備 PR で main に反映し、人がマージしたコミットへのタグ push で公開します。Release workflow は main・タグを更新しないため、公開用の branch ruleset bypass は不要です。タグの作成権限は公開担当者に合わせて設定します。詳細は[リリース手順](releases.md)を参照してください。
 
 GitHub の仕様を確認した日付: 2026-09-18。
