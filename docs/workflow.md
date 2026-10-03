@@ -37,4 +37,4 @@ PR のソースコードは checkout・実行しません。実行中の workflo
 4. `config-sha` 出力と `validate-config` operation を参照する処理を削除します。設定検証 CLI も廃止しました。
 5. default branch に反映し、Run workflow でラベルを同期します。
 
-[利用例](../examples/pr-merge-readiness.yml)は対応版の SHA を差し込む形式です。本リポジトリの運用 workflow と `.github/pr-merge-readiness.toml` は、公開済み v0.7.0 を動かすために維持しています。対応版の公開後、参照 SHA と `with` を同時に更新し、TOML と `push` トリガーを削除してください。実装 PR では `dist/` を更新しません。配布準備・公開は[リリース手順](releases.md)に従います。
+[利用例](../examples/pr-merge-readiness.yml)は対応版の SHA を差し込む形式です。本リポジトリの運用 workflow と `.github/pr-merge-readiness.toml` は、公開済み v0.7.0 を動かすために維持しています。対応版の公開後、参照 SHA と `with` を同時に更新し、TOML と `push` トリガーを削除してください。実装 PR では `dist/` を更新しません。配布準備・公開は[リリース手順](../RELEASE.md)に従います。

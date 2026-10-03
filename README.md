@@ -147,7 +147,7 @@ devcontainer exec --workspace-folder . npm run check:dist -- build/dist
 devcontainer exec --workspace-folder . npm run test:bundle
 ```
 
-開発用バンドルは `build/dist/` に生成し、追跡済み `dist/` は上書きしません。配布物の検証・公開は[リリース手順](docs/releases.md)を参照してください。実行時のプロンプトは [RELEASE.md](RELEASE.md) です。
+開発用バンドルは `build/dist/` に生成し、追跡済み `dist/` は上書きしません。配布物の検証・公開は[リリース手順](RELEASE.md)を参照してください。
 
 ## ライセンス
 
