@@ -1,6 +1,6 @@
 {
   "name": "pr-merge-readiness-action",
-  "version": "0.4.0",
+  "version": "0.7.7",
   "private": true,
   "type": "module",
   "description": "PR の変更履歴に基づく追加確認を観測する GitHub Action",

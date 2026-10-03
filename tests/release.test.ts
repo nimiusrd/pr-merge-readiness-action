@@ -42,6 +42,14 @@ async function fixture() {
       },
     });
   await mkdir(repo);
+  await writeFile(
+    join(repo, "package.json"),
+    '{\n  "name": "fixture",\n  "version": "1.2.3"\n}\n',
+  );
+  await writeFile(
+    join(repo, "package-lock.json"),
+    '{\n  "name": "fixture",\n  "version": "1.2.3",\n  "lockfileVersion": 3,\n  "packages": {\n    "": {\n      "name": "fixture",\n      "version": "1.2.3"\n    }\n  }\n}\n',
+  );
   await exec("git", ["init", "--bare", remote]);
   await git("init", "-b", "main");
   await git("config", "user.name", "Fixture");
@@ -95,6 +103,24 @@ test("main にマージ済みの軽量タグと正しい配布物を受け付け
   try {
     await c.verify();
     await checkDistribution(c.dist);
+  } finally {
+    await c.close();
+  }
+});
+test("ソースの version がタグと違うと拒否する", async () => {
+  const c = await fixture();
+  try {
+    await writeFile(
+      join(c.repo, "package.json"),
+      '{\n  "name": "fixture",\n  "version": "9.9.9"\n}\n',
+    );
+    await c.git("add", "package.json");
+    await c.git("commit", "-m", "mismatch");
+    await c.git("push", "origin", "main");
+    await c.git("tag", "-f", "v1.2.3");
+    await c.git("push", "--force", "origin", "refs/tags/v1.2.3");
+    c.env.GITHUB_SHA = (await c.git("rev-parse", "HEAD")).stdout.trim();
+    await assert.rejects(c.verify());
   } finally {
     await c.close();
   }
