@@ -12,21 +12,21 @@
 
 正本は [CI](.github/workflows/ci.yml)、[Release workflow](.github/workflows/release.yml)、[タグ・配布物の検証](scripts/validate_release.sh)、[公開スクリプト](scripts/publish_release.sh)です。Release workflow の手動実行や配布準備 PR の自動作成は行いません。
 
-起動メッセージの `PMR_VERSION` と `PMR_SOURCE_SHA` を使い、この文書の工程1から工程5を、この順と境界で実行する。コマンドと完了条件はこの文書に従う。
+`RELEASE.md` の工程1から工程5を、起動メッセージの `PMR_VERSION` と `PMR_SOURCE_SHA` で実行する。コマンド、完了条件、失敗時の対応は `RELEASE.md` に従う。
 
 `PMR_VERSION` は未使用の `vMAJOR.MINOR.PATCH`、`PMR_SOURCE_SHA` は工程1で選んだ main CI の40桁 SHA である。どちらかが無い場合は終了する。`package.json` の version、既存タグ、ラベルからは決めない。
 
 - `devcontainer exec --workspace-folder .` は付けず、同じ引数を Node.js 24 で直接実行する。
-- ブランチ名は実行環境が要求する接頭辞に合わせる。要求が無ければ配布準備は `prepare-$PMR_VERSION`、参照更新は `refs-$PMR_VERSION` とする。シェル例の `codex/prepare-$PMR_VERSION` は、同じ手順を手元で進めるときの名前である。
+- ブランチ名は実行環境が要求する接頭辞に合わせる。要求が無ければ配布準備は `prepare-$PMR_VERSION`、参照更新は `refs-$PMR_VERSION` とする。`RELEASE.md` のシェル例 `codex/prepare-$PMR_VERSION` は、同じ手順を手元で進めるときの名前である。
 - `evidence/` はコミットしない。実測 JSON・API 応答・ログも Git に含めない。
 - 配布準備 PR と参照更新 PR は draft で開く。マージ、承認、Ready への変更、自動マージの有効化はしない。
 - CI が失敗しても製品ソースは変更しない。ローカルの `npm run build` で `dist/` を差し替えない。
 - 配布準備 PR を開いたあと、その PR が main へマージされるまで待つ。コメント、レビュー、PR 上の CI 成功では工程3へ進まない。
 - CI の完了を待ち、未完了のまま次の工程へ進まない。結果を確認できない場合は、確認できた URL を残して終了する。
-- 工程3の確認が全て一致したあとだけ、文書どおり注釈付きタグを push する。タグの削除、移動、force push はしない。push が権限で拒否された場合は、確認結果と push するコマンドを残して終了する。
+- 工程3の確認が全て一致したあとだけ、`RELEASE.md` のとおり注釈付きタグを push する。タグの削除、移動、force push はしない。push が権限で拒否された場合は、確認結果と push するコマンドを残して終了する。
 - `gh release create` と Release workflow の手動実行はしない。公開はタグ push で起動する Release workflow に任せる。
 - 工程4が一致してから工程5の参照更新 PR を開き、そこで終了する。運用 workflow が旧版の SHA を指しているときは、SHA だけを新コミットへ付け替えない。`docs/workflow.md` の移行手順を同じ PR で完了し、`npm run check:workflows` が成功することを確認する。
-- 失敗したときはこの文書の「失敗時の対応」に従う。既存タグは動かさない。
+- 失敗したときは `RELEASE.md` の「失敗時の対応」に従う。既存タグは動かさない。
 
 1. 工程1を実行する。起動メッセージの SHA が main の祖先であり、その SHA への main の push CI が工程1の条件を全て満たすことを確認する。満たさなければ終了する。
 2. 工程2を実行する。artifact を配置して検証し、配布準備 PR を draft で開く。ステージした差分は `dist/` の3ファイルだけにする。
