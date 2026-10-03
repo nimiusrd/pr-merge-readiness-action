@@ -1,6 +1,6 @@
 # リリース手順
 
-公開担当者は、main CI の配布物を採用し、`PMR_VERSION` と `PMR_SOURCE_SHA` を渡してこの手順を実行します。手順が配布準備 PR を draft で開き、人が main にマージしたあと、そのコミットにタグを付けて push すると Release workflow が公開します。
+公開担当者はこの手順を実行します。手順は、前回の公開以降の変更内容から `PMR_VERSION` を決め、ルートの `package.json` と `package-lock.json` の version をそれに合わせる PR を draft で開きます。人がそれをマージした main CI の配布物で、配布準備 PR を draft で開きます。人が配布準備 PR を main にマージしたあと、そのコミットにタグを付けて push すると Release workflow が公開します。
 
 | 工程                              | 完了条件                                                                 |
 | --------------------------------- | ------------------------------------------------------------------------ |
@@ -10,16 +10,16 @@
 | 4. 公開を確認する                 | タグの SHA・公開済み Immutable Release・asset が一致している             |
 | 5. 参照更新 PR を作る             | 導入例と運用 workflow を公開済みの40桁 SHA に固定している。本文を保存してから draft で開いている。旧版からの移行では `with` の追加、追跡されている TOML の削除、legacy 検査の解除が済み、提出前チェックが成功している |
 
-正本は [CI](.github/workflows/ci.yml)、[Release workflow](.github/workflows/release.yml)、[タグ・配布物の検証](scripts/validate_release.sh)、[公開スクリプト](scripts/publish_release.sh)です。Release workflow の手動実行は行いません。配布準備 PR は、`PMR_VERSION` と `PMR_SOURCE_SHA` を渡してこの手順を実行したときに開きます。スケジュールや、この手順の起動以外では開きません。
+正本は [CI](.github/workflows/ci.yml)、[Release workflow](.github/workflows/release.yml)、[タグ・配布物の検証](scripts/validate_release.sh)、[公開スクリプト](scripts/publish_release.sh)です。Release workflow の手動実行は行いません。バージョン同期 PR と配布準備 PR は、この手順を実行したときに開きます。スケジュールや、この手順の起動以外では開きません。
 
-`RELEASE.md` の工程1から工程5を、起動メッセージの `PMR_VERSION` と `PMR_SOURCE_SHA` で実行する。コマンド、完了条件、失敗時の対応は `RELEASE.md` に従う。
+`RELEASE.md` のバージョン決定と工程1から工程5を実行する。コマンド、完了条件、失敗時の対応は `RELEASE.md` に従う。
 
-`PMR_VERSION` は未使用の `vMAJOR.MINOR.PATCH`、`PMR_SOURCE_SHA` は工程1で選んだ main CI の40桁 SHA である。どちらかが無い場合は終了する。`package.json` の version、既存タグ、ラベルからは決めない。
+`PMR_VERSION` は、前回の公開タグ以降の変更内容から決めた未使用の `vMAJOR.MINOR.PATCH` である。`PMR_SOURCE_SHA` は、バージョンを同期した PR を main にマージしたコミットの、main の push CI の40桁 SHA である。起動メッセージにこれらが無くても、この文書の規則で決める。既存タグ、ラベル、起動メッセージの指定値では決めない。
 
 - `devcontainer exec --workspace-folder .` は付けず、同じ引数を Node.js 24 で直接実行する。配布物の配置は、接頭辞を外すと `--remote-env` から始まる。そのコマンドは工程2に書いた `env PMR_BUNDLE_DIR="$PMR_BUNDLE_DIR" bash -euo pipefail -c '...'` を使う。
 - ブランチ名は実行環境が要求する接頭辞に合わせる。要求が無ければ配布準備は `prepare-$PMR_VERSION`、参照更新は `refs-$PMR_VERSION` とする。`RELEASE.md` のシェル例 `codex/prepare-$PMR_VERSION` は、同じ手順を手元で進めるときの名前である。
 - `evidence/` はコミットしない。実測 JSON・API 応答・ログも Git に含めない。
-- 配布準備 PR と参照更新 PR は draft で開く。マージ、承認、Ready への変更、自動マージの有効化はしない。
+- バージョン同期 PR、配布準備 PR、参照更新 PR は draft で開く。マージ、承認、Ready への変更、自動マージの有効化はしない。
 - CI が失敗しても製品ソースは変更しない。ローカルの `npm run build` で `dist/` を差し替えない。
 - 配布準備 PR を開いたあと、その PR が main へマージされるまで待つ。コメント、レビュー、PR 上の CI 成功では工程3へ進まない。
 - CI の完了を待ち、未完了のまま次の工程へ進まない。結果を確認できない場合は、確認できた URL を残して終了する。
@@ -28,18 +28,19 @@
 - 工程4が一致してから工程5の参照更新 PR を開き、そこで終了する。本文は `$PMR_PREP_DIR/refs-pr.md` に保存してから `gh pr create` する。運用 workflow が `with` のない旧版を指しているときは、SHA だけを新コミットへ付け替えない。`docs/workflow.md` の移行、追跡されている場合だけの `.github/pr-merge-readiness.toml` の削除、`scripts/check-workflows.ts` の legacy 検査の解除を同じ PR に含める。コミット前に `npm ci`、`npm test`、`npm run lint`、`npm run format:check`、`npm run typecheck`、`npm run check:workflows` が成功することを確認する。
 - 失敗したときは `RELEASE.md` の「失敗時の対応」に従う。既存タグは動かさない。
 
-1. 工程1を実行する。起動メッセージの SHA が main の祖先であり、その SHA への main の push CI が工程1の条件を全て満たすことを確認する。満たさなければ終了する。
-2. 工程2を実行する。artifact を配置して検証し、配布準備 PR を draft で開く。ステージした差分は `dist/` の3ファイルだけにする。
-3. レビューされ、main へマージされるまで待つ。
-4. 工程3を実行する。マージコミットを `PMR_RELEASE_SHA` とし、main の push CI とソース差分を確認する。製品ソース・依存・ビルド設定が変わっていればタグを作らず終了する。確認後にタグを push し、Release workflow の `verify` と `publish` の両方が成功するまで待つ。失敗した run の URL を残し、タグは削除も移動もしない。
-5. 工程4を実行する。タグが指すコミット、Immutable Release、asset、タグ内の `dist/` が一致することを確認する。
-6. 工程5を実行する。参照更新 PR を draft で開いて終了する。マージしない。
+1. 「バージョンを変更内容から決める」を実行する。前回の公開タグ以降の変更を分類し、`PMR_VERSION` を決める。ルートの `package.json` と `package-lock.json` の version がそれと違うときは、その2ファイルの version だけを更新する PR を draft で開く。人が main へマージするまで待つ。マージ後の main の push CI が成功したコミットを `PMR_SOURCE_SHA` とする。分類できない、または決めたバージョンがタグか Release と衝突する場合は終了する。
+2. 工程1を実行する。`PMR_SOURCE_SHA` が main の祖先であり、その SHA への main の push CI が工程1の条件を全て満たすことを確認する。満たさなければ終了する。
+3. 工程2を実行する。artifact を配置して検証し、配布準備 PR を draft で開く。ステージした差分は `dist/` の3ファイルだけにする。
+4. レビューされ、main へマージされるまで待つ。
+5. 工程3を実行する。マージコミットを `PMR_RELEASE_SHA` とし、main の push CI とソース差分を確認する。製品ソース・依存・ビルド設定が変わっていればタグを作らず終了する。確認後にタグを push し、Release workflow の `verify` と `publish` の両方が成功するまで待つ。失敗した run の URL を残し、タグは削除も移動もしない。
+6. 工程4を実行する。タグが指すコミット、Immutable Release、asset、タグ内の `dist/` が一致することを確認する。
+7. 工程5を実行する。参照更新 PR を draft で開いて終了する。マージしない。
 
 ## 開始前に確認すること
 
 - 公開するソース変更が main にマージされている。
 - 作業ツリーに未コミットの変更がない。Git・GitHub CLI はホスト、npm・配布ファイルの操作は Node.js 24 の Dev Container で実行する。
-- タグと Release（Draft を含む）の両方で未使用の `vMAJOR.MINOR.PATCH` を決めている。先頭ゼロ、prerelease、build metadata は使用できない。ルートの `package.json` の version はタグとは独立している。
+- 前回の公開タグ以降の変更内容から、未使用の `vMAJOR.MINOR.PATCH` を決める。先頭ゼロ、prerelease、build metadata は使用できない。ルートの `package.json` と `package-lock.json` の version は、そのタグから先頭の `v` を除いた値と一致させる。
 - リポジトリで Immutable Releases が有効になっている。公開 job の `GITHUB_TOKEN` には `contents: write` が必要。
 
 手順全体で次の2つの SHA を区別します。**利用側の `uses:` に固定するのは配布用 SHA です。**
@@ -51,12 +52,38 @@
 
 以下のコマンドはリポジトリのルートで、同じシェルから順に実行します。バージョン、SHA、run ID の例は実際の値に置き換えてください。コマンドが失敗したり確認結果が一致しなかったりした場合は、原因を解消してから次に進みます。
 
+## バージョンを変更内容から決める
+
+main に含まれる最新の公開タグを前回の公開とします。タグ名は `vMAJOR.MINOR.PATCH` だけを対象にし、そのコミットが `origin/main` の祖先であることを確認します。`vX.Y.Z..origin/main` の差分を読み、次の順で1つに分類します。差分が空なら終了します。
+
+| 差分 | `PMR_VERSION` |
+| --- | --- |
+| `action.yml` の入力・出力の削除、既定値の変更、必須化、または既存の判定結果を変える変更 | 前回の major を 1 上げ、minor と patch を 0 にする |
+| 利用側が新たに使える入力・判定・出力の追加 | 前回の minor を 1 上げ、patch を 0 にする |
+| 上記以外（修正、文書、内部実装、公開手順） | 前回の patch を 1 上げる |
+
+決めた `vMAJOR.MINOR.PATCH` がタグまたは Release（Draft を含む）に既にある場合は終了します。ソースに書く version は、そのタグから先頭の `v` を除いた `MAJOR.MINOR.PATCH` です。ルートの `package.json` の `version` と、`package-lock.json` の先頭および `packages[""]` の `version` が既にその値なら、この節の PR は作りません。その version を含む最新の main で成功している push CI の `headSha` を `PMR_SOURCE_SHA` とします。違うときは、最新の main から draft の PR を開き、その3か所だけを更新します。他のファイルは変えません。人が main にマージするまで待ち、マージ後の main の push CI が成功したコミットを `PMR_SOURCE_SHA` とします。
+
+```sh
+PMR_REPO=nimiusrd/pr-merge-readiness-action
+# PMR_VERSION は上の分類で決めた値。例: v0.7.7
+git fetch origin main
+git switch -c "codex/version-$PMR_VERSION" origin/main
+# package.json と package-lock.json の当該 version だけを更新する。
+git add package.json package-lock.json
+git commit -m "$PMR_VERSION にソースの version を合わせる"
+git push -u origin "codex/version-$PMR_VERSION"
+gh pr create --repo "$PMR_REPO" --draft --base main --head "codex/version-$PMR_VERSION" \
+  --title "$PMR_VERSION の version を同期する" \
+  --body "$(printf '%s\n' "## 概要" "" "$PMR_VERSION に合わせて、package.json と package-lock.json の version を更新する。" "" "変更の分類: <patch|minor|major>" "" "前回の公開: <前回タグ>")"
+```
+
 ## 1. ソースと main CI を選ぶ
 
 ```sh
 PMR_REPO=nimiusrd/pr-merge-readiness-action
-PMR_VERSION=v0.8.0  # 例。実際に公開する未使用のバージョンを指定する。
-PMR_SOURCE_SHA='CIで検証した40桁SHAに置き換える'
+PMR_VERSION=v0.7.7  # 変更内容から決めたバージョン。
+PMR_SOURCE_SHA='バージョン同期PRをマージしたmain CIの40桁SHAに置き換える'
 
 git status --short
 git fetch origin main
