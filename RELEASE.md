@@ -1,6 +1,6 @@
 # リリース手順
 
-公開担当者は、main CI の配布物を採用し、配布準備 PR を手動で作成します。PR を main にマージした後、そのコミットにタグを付けて push すると Release workflow が公開します。
+公開担当者は、main CI の配布物を採用し、`PMR_VERSION` と `PMR_SOURCE_SHA` を渡してこの手順を実行します。手順が配布準備 PR を draft で開き、人が main にマージしたあと、そのコミットにタグを付けて push すると Release workflow が公開します。
 
 | 工程                              | 完了条件                                                                 |
 | --------------------------------- | ------------------------------------------------------------------------ |
@@ -8,9 +8,32 @@
 | 2. 配布準備 PR を作成・マージする | 検証済み artifact を `dist/` に配置し、PR の CI とレビューが完了している |
 | 3. タグを push する               | マージ後の main CI が成功し、ソースと配布物の対応を確認している          |
 | 4. 公開を確認する                 | タグの SHA・公開済み Immutable Release・asset が一致している             |
-| 5. 参照更新 PR を作る             | 導入例と運用 workflow を公開済みの40桁 SHA に固定している                |
+| 5. 参照更新 PR を作る             | 導入例と運用 workflow を公開済みの40桁 SHA に固定している。本文を保存してから draft で開いている。旧版からの移行では `with` の追加、追跡されている TOML の削除、legacy 検査の解除が済み、提出前チェックが成功している |
 
-正本は [CI](../.github/workflows/ci.yml)、[Release workflow](../.github/workflows/release.yml)、[タグ・配布物の検証](../scripts/validate_release.sh)、[公開スクリプト](../scripts/publish_release.sh)です。Release workflow の手動実行や配布準備 PR の自動作成は行いません。
+正本は [CI](.github/workflows/ci.yml)、[Release workflow](.github/workflows/release.yml)、[タグ・配布物の検証](scripts/validate_release.sh)、[公開スクリプト](scripts/publish_release.sh)です。Release workflow の手動実行は行いません。配布準備 PR は、`PMR_VERSION` と `PMR_SOURCE_SHA` を渡してこの手順を実行したときに開きます。スケジュールや、この手順の起動以外では開きません。
+
+`RELEASE.md` の工程1から工程5を、起動メッセージの `PMR_VERSION` と `PMR_SOURCE_SHA` で実行する。コマンド、完了条件、失敗時の対応は `RELEASE.md` に従う。
+
+`PMR_VERSION` は未使用の `vMAJOR.MINOR.PATCH`、`PMR_SOURCE_SHA` は工程1で選んだ main CI の40桁 SHA である。どちらかが無い場合は終了する。`package.json` の version、既存タグ、ラベルからは決めない。
+
+- `devcontainer exec --workspace-folder .` は付けず、同じ引数を Node.js 24 で直接実行する。配布物の配置は、接頭辞を外すと `--remote-env` から始まる。そのコマンドは工程2に書いた `env PMR_BUNDLE_DIR="$PMR_BUNDLE_DIR" bash -euo pipefail -c '...'` を使う。
+- ブランチ名は実行環境が要求する接頭辞に合わせる。要求が無ければ配布準備は `prepare-$PMR_VERSION`、参照更新は `refs-$PMR_VERSION` とする。`RELEASE.md` のシェル例 `codex/prepare-$PMR_VERSION` は、同じ手順を手元で進めるときの名前である。
+- `evidence/` はコミットしない。実測 JSON・API 応答・ログも Git に含めない。
+- 配布準備 PR と参照更新 PR は draft で開く。マージ、承認、Ready への変更、自動マージの有効化はしない。
+- CI が失敗しても製品ソースは変更しない。ローカルの `npm run build` で `dist/` を差し替えない。
+- 配布準備 PR を開いたあと、その PR が main へマージされるまで待つ。コメント、レビュー、PR 上の CI 成功では工程3へ進まない。
+- CI の完了を待ち、未完了のまま次の工程へ進まない。結果を確認できない場合は、確認できた URL を残して終了する。
+- 工程3の確認が全て一致したあとだけ、`RELEASE.md` のとおり注釈付きタグを push する。タグの削除、移動、force push はしない。push が権限で拒否された場合は、確認結果と push するコマンドを残して終了する。
+- `gh release create` と Release workflow の手動実行はしない。公開はタグ push で起動する Release workflow に任せる。
+- 工程4が一致してから工程5の参照更新 PR を開き、そこで終了する。本文は `$PMR_PREP_DIR/refs-pr.md` に保存してから `gh pr create` する。運用 workflow が `with` のない旧版を指しているときは、SHA だけを新コミットへ付け替えない。`docs/workflow.md` の移行、追跡されている場合だけの `.github/pr-merge-readiness.toml` の削除、`scripts/check-workflows.ts` の legacy 検査の解除を同じ PR に含める。コミット前に `npm ci`、`npm test`、`npm run lint`、`npm run format:check`、`npm run typecheck`、`npm run check:workflows` が成功することを確認する。
+- 失敗したときは `RELEASE.md` の「失敗時の対応」に従う。既存タグは動かさない。
+
+1. 工程1を実行する。起動メッセージの SHA が main の祖先であり、その SHA への main の push CI が工程1の条件を全て満たすことを確認する。満たさなければ終了する。
+2. 工程2を実行する。artifact を配置して検証し、配布準備 PR を draft で開く。ステージした差分は `dist/` の3ファイルだけにする。
+3. レビューされ、main へマージされるまで待つ。
+4. 工程3を実行する。マージコミットを `PMR_RELEASE_SHA` とし、main の push CI とソース差分を確認する。製品ソース・依存・ビルド設定が変わっていればタグを作らず終了する。確認後にタグを push し、Release workflow の `verify` と `publish` の両方が成功するまで待つ。失敗した run の URL を残し、タグは削除も移動もしない。
+5. 工程4を実行する。タグが指すコミット、Immutable Release、asset、タグ内の `dist/` が一致することを確認する。
+6. 工程5を実行する。参照更新 PR を draft で開いて終了する。マージしない。
 
 ## 開始前に確認すること
 
@@ -85,11 +108,22 @@ git diff --cached --stat
 git diff --cached --name-status
 ```
 
+Dev Container を使わない実行では、配置だけ次にする。`devcontainer exec --workspace-folder .` を外した残りは `--remote-env` から始まり、実行できるコマンドにならない。
+
+```sh
+env PMR_BUNDLE_DIR="$PMR_BUNDLE_DIR" bash -euo pipefail -c '
+mkdir -p dist
+for file in index.js package.json SHA256SUMS; do
+  install -m 644 "$PMR_BUNDLE_DIR/$file" "dist/$file"
+done
+'
+```
+
 `dist/` は後述の3ファイルだけにします。余分なファイルがあれば内容を確認して除去し、構成・checksum・バンドルテストを再確認してください。バンドルテストは `node_modules` のない一時ディレクトリで、入力検証と HTTP による Action 実行を確認します。
 
 ### PR を提出する
 
-提出前に[開発チェック](../README.md#開発)を実行し、ステージした差分が配布物だけであることを確認します。以下の本文例の値を置き換え、その版の変更要約と検証結果を追記して、`$PMR_PREP_DIR/pr.md` に保存してください。
+提出前に[開発チェック](README.md#開発)を実行し、ステージした差分が配布物だけであることを確認します。以下の本文例の値を置き換え、その版の変更要約と検証結果を追記して、`$PMR_PREP_DIR/pr.md` に保存してください。
 
 ```markdown
 ## 概要
@@ -107,7 +141,7 @@ main の push CI で test・bundle の成功を確認。
 ```sh
 git commit -m "$PMR_VERSION の配布物を準備する"
 git push -u origin "codex/prepare-$PMR_VERSION"
-gh pr create --repo "$PMR_REPO" --base main --head "codex/prepare-$PMR_VERSION" \
+gh pr create --repo "$PMR_REPO" --draft --base main --head "codex/prepare-$PMR_VERSION" \
   --title "$PMR_VERSION の配布準備" --body-file "$PMR_PREP_DIR/pr.md"
 ```
 
@@ -179,7 +213,50 @@ git ls-tree -r "$PMR_VERSION^{commit}" dist/
 - `examples/pr-merge-readiness.yml`
 - `.github/workflows/pr-merge-readiness.yml`
 
-参照更新 PR の本文には、バージョン・変更要約・配布準備 PR・main CI run URL とソース SHA・マージ後の CI run URL・Release run URL と配布用 SHA・検証要約を記載します。実測 JSON・API 応答・ログは Git 管理せず、`evidence/` または Actions artifacts に保存します。
+運用 workflow が `with` のない旧版を指しているときは、SHA の置換だけでは終わらせません。同じ PR で次も行います。コミット前に、提出前チェックの `npm ci`、`npm test`、`npm run lint`、`npm run format:check`、`npm run typecheck`、`npm run check:workflows` を実行し、すべて成功することを確認します。
+
+- [運用と移行](docs/workflow.md)に従い、`with.stale-change-review-days` を追加し、設定検証用の `push` トリガーを削除する。
+- `.github/pr-merge-readiness.toml` を削除する。
+- `scripts/check-workflows.ts` で運用 workflow を legacy（`checkRuntime` の第3引数 `true`）として検査している分岐を外す。`with` ありで検査し、`on` から `push` を除かずに導入例と一致させる。
+
+参照更新 PR の本文には、バージョン・変更要約・配布準備 PR・main CI run URL とソース SHA・マージ後の CI run URL・Release run URL と配布用 SHA・検証要約を記載します。実測 JSON・API 応答・ログは Git 管理せず、`evidence/` または Actions artifacts に保存します。本文は PR 作成より前に `$PMR_PREP_DIR/refs-pr.md` へ保存します。PR は draft で開きます。
+
+```markdown
+## 概要
+
+<バージョン> の参照を配布用 SHA に更新する。
+配布用 SHA: <PMR_RELEASE_SHA>
+
+## 検証
+
+配布準備 PR: <URL>
+ソース SHA: <PMR_SOURCE_SHA>
+main CI: <URL>
+マージ後の CI: <URL>
+Release: <URL>
+```
+
+```sh
+git fetch origin main
+git switch -c "codex/refs-$PMR_VERSION" origin/main
+# 上の更新と、旧版からの移行では TOML の削除と check-workflows.ts の修正を済ませる。
+# 本文は $PMR_PREP_DIR/refs-pr.md に保存済みであること。
+devcontainer exec --workspace-folder . npm ci
+devcontainer exec --workspace-folder . npm test
+devcontainer exec --workspace-folder . npm run lint
+devcontainer exec --workspace-folder . npm run format:check
+devcontainer exec --workspace-folder . npm run typecheck
+devcontainer exec --workspace-folder . npm run check:workflows
+git add README.md examples/pr-merge-readiness.yml \
+  .github/workflows/pr-merge-readiness.yml scripts/check-workflows.ts
+if git ls-files --error-unmatch .github/pr-merge-readiness.toml >/dev/null 2>&1; then
+  git add -u -- .github/pr-merge-readiness.toml
+fi
+git commit -m "$PMR_VERSION の参照を更新する"
+git push -u origin "codex/refs-$PMR_VERSION"
+gh pr create --repo "$PMR_REPO" --draft --base main --head "codex/refs-$PMR_VERSION" \
+  --title "$PMR_VERSION の参照更新" --body-file "$PMR_PREP_DIR/refs-pr.md"
+```
 
 ## 失敗時の対応
 
@@ -217,7 +294,7 @@ TypeScript を esbuild で依存ごと JavaScript にバンドルします。`ac
 
 全て通常のファイルとし、symlink は許可しません。Release asset はこの3ファイルを梱包した `pr-merge-readiness-action.tar.gz` です。ソースと依存の正本は `.node-version`・ルートの `package.json`・`package-lock.json` です。
 
-開発時は[開発チェック](../README.md#開発)に続けて、次を実行します。
+開発時は[開発チェック](README.md#開発)に続けて、次を実行します。
 
 ```sh
 devcontainer exec --workspace-folder . npm run build
