@@ -32,7 +32,7 @@
 2. 工程1を実行する。`PMR_SOURCE_SHA` が main の祖先であり、その SHA への main の push CI が工程1の条件を全て満たすことを確認する。満たさなければ終了する。配布準備へ進む直前に、前回の公開タグからその `PMR_SOURCE_SHA` までを同じ表で再分類する。結果が `PMR_VERSION` と一致しなければ終了する。バージョンは上げ直さない。
 3. 工程2を実行する。artifact を配置して検証し、配布準備 PR を draft で開く。ステージした差分は `dist/` の3ファイルだけにする。
 4. レビューされ、main へマージされるまで待つ。
-5. 工程3を実行する。マージコミットを `PMR_RELEASE_SHA` とし、main の push CI とソース差分を確認する。製品ソース・依存・ビルド設定が変わっていればタグを作らず終了する。確認後にタグを push し、Release workflow の `verify` と `publish` の両方が成功するまで待つ。失敗した run の URL を残し、タグは削除も移動もしない。
+5. 工程3を実行する。マージコミットを `PMR_RELEASE_SHA` とし、main の push CI とソース差分を確認する。製品ソース・依存・ビルド設定が変わっていればタグを作らず終了する。タグを作る直前に公開済みタグと Release を再取得し、現在の最新の公開済み版から、その版から `PMR_RELEASE_SHA` までの差分を同じ表で分類した次の未使用版が `PMR_VERSION` であることを確認する。一致しなければタグを push せず終了する。確認後にタグを push し、Release workflow の `verify` と `publish` の両方が成功するまで待つ。失敗した run の URL を残し、タグは削除も移動もしない。
 6. 工程4を実行する。タグが指すコミット、Immutable Release、asset、タグ内の `dist/` が一致することを確認する。
 7. 工程5を実行する。参照更新 PR を draft で開いて終了する。マージしない。
 
@@ -62,7 +62,7 @@ main に含まれる最新の公開タグを前回の公開とします。タグ
 | 後方互換を保ったまま、利用側が新たに使える入力・判定・出力を追加する変更 | 前回の minor を 1 上げ、patch を 0 にする |
 | 上記以外（修正、文書、内部実装、公開手順） | 前回の patch を 1 上げる |
 
-決めた `vMAJOR.MINOR.PATCH` がタグまたは Release（Draft を含む）に既にある場合は終了します。ソースに書く version は、そのタグから先頭の `v` を除いた `MAJOR.MINOR.PATCH` です。ルートの `package.json` の `version` と、`package-lock.json` の先頭および `packages[""]` の `version` が既にその値なら、この節の PR は作りません。その version を含む最新の main で成功している push CI の `headSha` を `PMR_SOURCE_SHA` とします。違うときは、最新の main から draft の PR を開き、その3か所だけを更新します。他のファイルは変えません。人が main にマージするまで待ち、マージ後の main の push CI が成功したコミットを `PMR_SOURCE_SHA` とします。
+公開済みとは、同じ名前のタグが main の祖先を指し、Release が Draft でなく存在する状態です。タグだけがあり Release が無い版は、失敗して予約された番号です。同じ分類の次の番号へ進みます。patch なら patch を 1 上げ、minor なら minor を 1 上げて patch を 0 にし、major なら major を 1 上げて minor と patch を 0 にします。進めた版がまた予約済みなら、同じ進め方を繰り返します。公開済みの版、およびそれより新しい公開済み版は飛び越しません。ソースに書く version は、選んだタグから先頭の `v` を除いた `MAJOR.MINOR.PATCH` です。ルートの `package.json` の `version` と、`package-lock.json` の先頭および `packages[""]` の `version` が既にその値なら、この節の PR は作りません。その version を含む最新の main で成功している push CI の `headSha` を `PMR_SOURCE_SHA` とします。違うときは、最新の main から draft の PR を開き、その3か所だけを更新します。他のファイルは変えません。人が main にマージするまで待ち、マージ後の main の push CI が成功したコミットを `PMR_SOURCE_SHA` とします。
 
 ```sh
 PMR_REPO=nimiusrd/pr-merge-readiness-action
@@ -194,7 +194,7 @@ gh run view "$PMR_MERGE_RUN_ID" --repo "$PMR_REPO" \
 
 工程1と同じ条件で CI 全体の成功を確認し、`headSha` が `PMR_RELEASE_SHA` と一致することを確かめます。差分もレビューし、**artifact のソース SHA からタグ対象コミットまでに、製品ソース・依存・ビルド設定が変わっていたら、変更後の main CI artifact で配布準備をやり直します。** checksum とバンドルテストだけでは、ソースとの完全な対応を証明できません。
 
-確認後、タグを作成して push します。タグ対象は main の先端でなくても、履歴に含まれていれば公開できます。
+確認後、タグを作成して push します。その直前に公開済みタグと Release を再取得します。現在の最新の公開済み版から、その版のコミットから `PMR_RELEASE_SHA` までの差分を上の表で分類し、予約済みタグを飛ばした次の未使用版が `PMR_VERSION` でなければ、タグは push しません。タグ対象は main の先端でなくても、履歴に含まれていれば公開できます。
 
 ```sh
 git tag -a "$PMR_VERSION" "$PMR_RELEASE_SHA" -m "$PMR_VERSION"
