@@ -8,7 +8,7 @@
 | 2. 配布準備 PR を作成・マージする | 検証済み artifact を `dist/` に配置し、PR の CI とレビューが完了している |
 | 3. タグを push する               | マージ後の main CI が成功し、ソースと配布物の対応を確認している          |
 | 4. 公開を確認する                 | タグの SHA・公開済み Immutable Release・asset が一致している             |
-| 5. 参照更新 PR を作る             | 導入例と運用 workflow を公開済みの40桁 SHA に固定している                |
+| 5. 参照更新 PR を作る             | 導入例と運用 workflow を公開済みの40桁 SHA に固定している。旧版からの移行では `with` の追加、TOML の削除、legacy 検査の解除が済み、`check:workflows` が成功している |
 
 正本は [CI](.github/workflows/ci.yml)、[Release workflow](.github/workflows/release.yml)、[タグ・配布物の検証](scripts/validate_release.sh)、[公開スクリプト](scripts/publish_release.sh)です。Release workflow の手動実行は行いません。配布準備 PR は、`PMR_VERSION` と `PMR_SOURCE_SHA` を渡してこの手順を実行したときに開きます。スケジュールや、この手順の起動以外では開きません。
 
@@ -25,7 +25,7 @@
 - CI の完了を待ち、未完了のまま次の工程へ進まない。結果を確認できない場合は、確認できた URL を残して終了する。
 - 工程3の確認が全て一致したあとだけ、`RELEASE.md` のとおり注釈付きタグを push する。タグの削除、移動、force push はしない。push が権限で拒否された場合は、確認結果と push するコマンドを残して終了する。
 - `gh release create` と Release workflow の手動実行はしない。公開はタグ push で起動する Release workflow に任せる。
-- 工程4が一致してから工程5の参照更新 PR を開き、そこで終了する。運用 workflow が旧版の SHA を指しているときは、SHA だけを新コミットへ付け替えない。`docs/workflow.md` の移行手順を同じ PR で完了し、`npm run check:workflows` が成功することを確認する。
+- 工程4が一致してから工程5の参照更新 PR を開き、そこで終了する。運用 workflow が `with` のない旧版を指しているときは、SHA だけを新コミットへ付け替えない。`docs/workflow.md` の移行、`.github/pr-merge-readiness.toml` の削除、`scripts/check-workflows.ts` の legacy 検査の解除を同じ PR に含め、`npm run check:workflows` が成功することを確認する。
 - 失敗したときは `RELEASE.md` の「失敗時の対応」に従う。既存タグは動かさない。
 
 1. 工程1を実行する。起動メッセージの SHA が main の祖先であり、その SHA への main の push CI が工程1の条件を全て満たすことを確認する。満たさなければ終了する。
@@ -213,13 +213,21 @@ git ls-tree -r "$PMR_VERSION^{commit}" dist/
 - `examples/pr-merge-readiness.yml`
 - `.github/workflows/pr-merge-readiness.yml`
 
+運用 workflow が `with` のない旧版を指しているときは、SHA の置換だけでは終わらせません。同じ PR で次も行います。`npm run check:workflows` が成功してからコミットします。
+
+- [運用と移行](docs/workflow.md)に従い、`with.stale-change-review-days` を追加し、設定検証用の `push` トリガーを削除する。
+- `.github/pr-merge-readiness.toml` を削除する。
+- `scripts/check-workflows.ts` で運用 workflow を legacy（`checkRuntime` の第3引数 `true`）として検査している分岐を外す。`with` ありで検査し、`on` から `push` を除かずに導入例と一致させる。
+
 参照更新 PR の本文には、バージョン・変更要約・配布準備 PR・main CI run URL とソース SHA・マージ後の CI run URL・Release run URL と配布用 SHA・検証要約を記載します。実測 JSON・API 応答・ログは Git 管理せず、`evidence/` または Actions artifacts に保存します。PR は draft で開きます。
 
 ```sh
 git fetch origin main
 git switch -c "codex/refs-$PMR_VERSION" origin/main
-# 上の3ファイルを同じ配布用 SHA に更新し、本文を $PMR_PREP_DIR/refs-pr.md に保存する。
-git add README.md examples/pr-merge-readiness.yml .github/workflows/pr-merge-readiness.yml
+# 上の更新と、旧版からの移行では TOML の削除と check-workflows.ts の修正を済ませる。
+git add README.md examples/pr-merge-readiness.yml \
+  .github/workflows/pr-merge-readiness.yml scripts/check-workflows.ts
+git add -u -- .github/pr-merge-readiness.toml
 git commit -m "$PMR_VERSION の参照を更新する"
 git push -u origin "codex/refs-$PMR_VERSION"
 gh pr create --repo "$PMR_REPO" --draft --base main --head "codex/refs-$PMR_VERSION" \
