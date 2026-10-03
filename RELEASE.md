@@ -29,7 +29,7 @@
 - 失敗したときは `RELEASE.md` の「失敗時の対応」に従う。既存タグは動かさない。
 
 1. 「バージョンを変更内容から決める」を実行する。前回の公開タグ以降の変更を分類し、`PMR_VERSION` を決める。ルートの `package.json` と `package-lock.json` の version がそれと違うときは、その2ファイルの version だけを更新する PR を draft で開く。人が main へマージするまで待つ。マージ後の main の push CI が成功したコミットを `PMR_SOURCE_SHA` とする。分類できない、または決めたバージョンがタグか Release と衝突する場合は終了する。
-2. 工程1を実行する。`PMR_SOURCE_SHA` が main の祖先であり、その SHA への main の push CI が工程1の条件を全て満たすことを確認する。満たさなければ終了する。
+2. 工程1を実行する。`PMR_SOURCE_SHA` が main の祖先であり、その SHA への main の push CI が工程1の条件を全て満たすことを確認する。満たさなければ終了する。配布準備へ進む直前に、前回の公開タグからその `PMR_SOURCE_SHA` までを同じ表で再分類する。結果が `PMR_VERSION` と一致しなければ終了する。バージョンは上げ直さない。
 3. 工程2を実行する。artifact を配置して検証し、配布準備 PR を draft で開く。ステージした差分は `dist/` の3ファイルだけにする。
 4. レビューされ、main へマージされるまで待つ。
 5. 工程3を実行する。マージコミットを `PMR_RELEASE_SHA` とし、main の push CI とソース差分を確認する。製品ソース・依存・ビルド設定が変わっていればタグを作らず終了する。確認後にタグを push し、Release workflow の `verify` と `publish` の両方が成功するまで待つ。失敗した run の URL を残し、タグは削除も移動もしない。
@@ -58,8 +58,8 @@ main に含まれる最新の公開タグを前回の公開とします。タグ
 
 | 差分 | `PMR_VERSION` |
 | --- | --- |
-| `action.yml` の入力・出力の削除、既定値の変更、必須化、または既存の判定結果を変える変更 | 前回の major を 1 上げ、minor と patch を 0 にする |
-| 利用側が新たに使える入力・判定・出力の追加 | 前回の minor を 1 上げ、patch を 0 にする |
+| 既存の利用・実行契約と後方互換でない変更。入力・出力の削除、既定値の変更、必須化、既存の判定結果の変更に加え、必要な token 権限の追加、対応イベントの削除、対応 runner の縮小など、既存 workflow を失敗させる変更を含む | 前回の major を 1 上げ、minor と patch を 0 にする |
+| 後方互換を保ったまま、利用側が新たに使える入力・判定・出力を追加する変更 | 前回の minor を 1 上げ、patch を 0 にする |
 | 上記以外（修正、文書、内部実装、公開手順） | 前回の patch を 1 上げる |
 
 決めた `vMAJOR.MINOR.PATCH` がタグまたは Release（Draft を含む）に既にある場合は終了します。ソースに書く version は、そのタグから先頭の `v` を除いた `MAJOR.MINOR.PATCH` です。ルートの `package.json` の `version` と、`package-lock.json` の先頭および `packages[""]` の `version` が既にその値なら、この節の PR は作りません。その version を含む最新の main で成功している push CI の `headSha` を `PMR_SOURCE_SHA` とします。違うときは、最新の main から draft の PR を開き、その3か所だけを更新します。他のファイルは変えません。人が main にマージするまで待ち、マージ後の main の push CI が成功したコミットを `PMR_SOURCE_SHA` とします。
@@ -95,7 +95,7 @@ gh run view "$PMR_RUN_ID" --repo "$PMR_REPO" \
   --json url,workflowName,headBranch,headSha,event,status,conclusion,jobs
 ```
 
-選んだ run が以下を全て満たすことを確認します。
+選んだ run が以下を全て満たすことを確認します。満たしたあと、配布準備へ進む直前に、前回の公開タグからこの `PMR_SOURCE_SHA` までの差分を「バージョンを変更内容から決める」の表で再分類します。結果が `PMR_VERSION` と一致しなければ終了します。待っている間に main へ入った変更で分類が上がっていても、決めたバージョンは上げ直しません。
 
 - `workflowName` が `CI`、`headBranch` が `main`、`event` が `push`。
 - `headSha` が `PMR_SOURCE_SHA` と一致する。
