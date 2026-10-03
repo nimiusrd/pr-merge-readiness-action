@@ -1,6 +1,6 @@
 # リリース手順
 
-公開担当者は、名前 `Release` の Cursor Automation にバージョンとソース SHA を渡して、この手順を実行します。Automation が配布準備 PR を開き、人がレビューして main にマージします。マージ後の確認が終わってから Automation がそのコミットへタグを push し、Release workflow が公開します。続けて Automation が参照更新 PR を開きます。
+公開担当者は、main CI の配布物を採用し、配布準備 PR を手動で作成します。PR を main にマージした後、そのコミットにタグを付けて push すると Release workflow が公開します。実行時のプロンプトは [RELEASE.md](../RELEASE.md) です。
 
 | 工程                              | 完了条件                                                                 |
 | --------------------------------- | ------------------------------------------------------------------------ |
@@ -10,18 +10,12 @@
 | 4. 公開を確認する                 | タグの SHA・公開済み Immutable Release・asset が一致している             |
 | 5. 参照更新 PR を作る             | 導入例と運用 workflow を公開済みの40桁 SHA に固定している                |
 
-正本は [CI](../.github/workflows/ci.yml)、[Release workflow](../.github/workflows/release.yml)、[タグ・配布物の検証](../scripts/validate_release.sh)、[公開スクリプト](../scripts/publish_release.sh)です。Release workflow の手動実行は行いません。配布準備 PR は、バージョンとソース SHA を渡して起動した Automation が開きます。
-
-## Cursor Automation
-
-実行順、起動方法、途中で止める条件は [RELEASE.md](../RELEASE.md) です。コマンドと完了条件はこの文書です。Automation のプロンプトは次の1文にします。
-
-> 起動メッセージの `PMR_VERSION` と `PMR_SOURCE_SHA` を使い、`RELEASE.md` に従ってリリース手順を実行する。
+正本は [CI](../.github/workflows/ci.yml)、[Release workflow](../.github/workflows/release.yml)、[タグ・配布物の検証](../scripts/validate_release.sh)、[公開スクリプト](../scripts/publish_release.sh)です。Release workflow の手動実行や配布準備 PR の自動作成は行いません。
 
 ## 開始前に確認すること
 
 - 公開するソース変更が main にマージされている。
-- 作業ツリーに未コミットの変更がない。Git・GitHub CLI はホスト、npm・配布ファイルの操作は Node.js 24 の Dev Container で実行する。Cursor Automation は [RELEASE.md](../RELEASE.md) に従い、Dev Container を使わず同じコマンドを直接実行する。
+- 作業ツリーに未コミットの変更がない。Git・GitHub CLI はホスト、npm・配布ファイルの操作は Node.js 24 の Dev Container で実行する。
 - タグと Release（Draft を含む）の両方で未使用の `vMAJOR.MINOR.PATCH` を決めている。先頭ゼロ、prerelease、build metadata は使用できない。ルートの `package.json` の version はタグとは独立している。
 - リポジトリで Immutable Releases が有効になっている。公開 job の `GITHUB_TOKEN` には `contents: write` が必要。
 
@@ -117,7 +111,7 @@ gh pr create --repo "$PMR_REPO" --base main --head "codex/prepare-$PMR_VERSION" 
   --title "$PMR_VERSION の配布準備" --body-file "$PMR_PREP_DIR/pr.md"
 ```
 
-ソース変更は混ぜません。PR の CI `test`・`bundle` とレビューが完了してから、人が main にマージします。CI `bundle` は、追跡済み `dist/` の checksum と同梱バンドルを検証した後、別の `build/dist/` に開発用バンドルを生成します。
+ソース変更は混ぜません。PR の CI `test`・`bundle` とレビューが完了してから、手動で main にマージします。CI `bundle` は、追跡済み `dist/` の checksum と同梱バンドルを検証した後、別の `build/dist/` に開発用バンドルを生成します。
 
 ## 3. マージ後の CI を確認し、タグを push する
 
