@@ -1,5 +1,17 @@
 # PR Merge Readiness
 
+## 保守終了
+
+本プロジェクトの開発・保守を終了します。PR のマージ条件は GitHub Ruleset、CI の必須ステータスチェック、CODEOWNERS で管理してください。設定の考え方は[推奨 Ruleset](docs/rulesets.md)を参照できます。
+
+独自機能として残していた「長期間変更されていないファイルへの変更に、人間の承認を促す」という条件も、通常のレビューに加えて Action を維持する十分な意義を見いだせなかったため、提供を終了します。新規導入は推奨しません。
+
+利用を終了する場合は、この Action を呼ぶ workflow を削除してください。他の処理と共用している場合は該当する step または job だけを削除します。旧版の専用設定ファイル `.github/pr-merge-readiness.toml` と、不要になった管理ラベルも削除できます。
+
+以下は保守終了前の仕様・導入手順の記録です。
+
+---
+
 GitHub の標準ルールでは表現できない追加確認事項を、PR の変更履歴などから提示することを責務とする GitHub Action です。マージ条件の強制は GitHub Ruleset に委ねます。
 
 [Action の責務](docs/responsibilities.md)と[推奨 Ruleset](docs/rulesets.md)に役割分担を記載しています。承認数・未解決スレッド・CI の結果・特定パスの担当者レビューは GitHub に委ねます。
